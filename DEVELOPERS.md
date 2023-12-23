@@ -10,6 +10,28 @@ place to start if you are looking to contribute.
 For information about the git process, see
 [CONTRIBUTING.md](CONTRIBUTING.md#How_to_contribute).
 
+## IDE settings
+### generate compile_commands.json
+compile_commands.json records the dependency relationship between `.c/.h` file.
+It is used by language server(ccls, clang, e.g.) to provide accurate code 
+completion, syntax highlighting, and other intelligent code analysis features.
+
+If you haven't built the project yet, you can do the following:
+```
+sudo apt-get install bear
+bear -- ./sys/install.sh
+```
+If you have built the project:
+```
+make clean
+bear -- make install
+```
+`bear` is tool that will hook the usage of gcc and generate `compile_commands.json`.
+
+### language server
+Both of `ccls` and `clangd` supports `compile_commands.json`. You can add 
+corresponding plugin for your IDE.
+
 ## Documentation
 
 Functions should have descriptive names and parameters. It should be clear what
@@ -36,6 +58,22 @@ with features.
   `r_return_` macro) fails.
 * `R2_DEBUG=1`: Show error messages and crash signal. Used for debugging plugin
   loading issues.
+
+### ABI stability and versioning
+
+During abi-stable seassons [x.y.0-x.y.8] it is not allowed to break the abi, this
+is checked in the CI using the `abidiff` tool on every commit. Sometimes keeping
+the abi/api stable implies doing ugly hacks. Those must be marked with the corresponding
+to the next MAJOR.MINOR release of r2.
+
+
+For example, during the development of 5.8.x we add a comment or use `#if R2_590` code
+blocks to specify those lines need to be changed when 5.8.9 in git.
+
+Only the even patch version numbers are considered a release. This means that if you have
+an odd patch version of r2 it was built from git instead of the release tarball or binaries.
+
+For more details read [doc/abi.md](doc/abi.md)
 
 ### Useful macros from [r\_types.h](libr/include/r_types.h)
 
@@ -484,7 +522,7 @@ against to use radare2's libraries without depending on an existing system
 installation. See [doc/static.md](doc/static.md) for more info.
 
 [This presentation](http://radare.org/get/lacon-radare-2009/) gives a good
-overview of the libraries.
+overview of the libraries. //Link not working temporarily.
 
 ## API
 
@@ -574,6 +612,7 @@ discard your current work, use the following commands:
 ```sh
 git clean -xdf
 git reset --hard
+rm -rf shlr/capstone
 ```
 
 ## Regression testing

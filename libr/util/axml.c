@@ -264,21 +264,21 @@ static bool dump_element(PJ *pj, RStrBuf *sb, string_pool_t *pool, namespace_t *
 		for (i = 0; i < count; i++) {
 			attribute_t a = element->attributes[i];
 			ut32 key_index = r_read_le32 (&a.name);
-			const char *key = (const char *)string_lookup (pool, data, data_size, key_index, NULL);
-			bool resource_key = false;
+			char *key = string_lookup (pool, data, data_size, key_index, NULL);
 			// If the key is empty, it is a cached resource name
-			if (key && *key == '\0') {
-				free ((char *)key);
-				key = "null";
-				resource_key = true;
+			if (R_STR_ISEMPTY (key)) {
+				R_FREE (key);
 				if (resource_map && key_index < resource_map_length) {
 					ut32 resource = r_read_le32 (&resource_map[key_index]);
 					if (resource >= 0x1010000) {
 						resource -= 0x1010000;
 						if (resource < ANDROID_ATTRIBUTE_NAMES_SIZE) {
-							key = ANDROID_ATTRIBUTE_NAMES[resource];
+							key = strdup (ANDROID_ATTRIBUTE_NAMES[resource]);
 						}
 					}
+				}
+				if (!key) {
+					key = strdup ("null");
 				}
 			}
 			char *value = resource_value (pool, data, data_size, &a.value);
@@ -301,9 +301,6 @@ static bool dump_element(PJ *pj, RStrBuf *sb, string_pool_t *pool, namespace_t *
 			}
 			if (i != count - 1) {
 				r_strbuf_append (sb, " ");
-			}
-			if (!resource_key) {
-				free ((char *)key);
 			}
 			free (value);
 		}
@@ -403,7 +400,9 @@ R_API char *r_axml_decode(const ut8 *data, const ut64 data_size, PJ *pj) {
 				free (element);
 				goto bad;
 			}
-			pj_ka (pj, "child");
+			if (pj) {
+				pj_ka (pj, "child");
+			}
 			depth++;
 			free (element);
 		} break;
@@ -416,14 +415,15 @@ R_API char *r_axml_decode(const ut8 *data, const ut64 data_size, PJ *pj) {
 			if (r_buf_read_at (buffer, offset, (void *)&end, sizeof (end)) != sizeof (end)) {
 				goto bad;
 			}
-
 			// The beginning of the start and end element structs
 			// are the same, so we can use this interchangably
 			if (!dump_element (pj, sb, pool, namespace, data, data_size, (start_element_t *)&end, 0,
 					resource_map, resource_map_length, &depth, false)) {
 				goto bad;
 			}
-			pj_end (pj);
+			if (pj) {
+				pj_end (pj);
+			}
 		} break;
 		case TYPE_START_NAMESPACE: {
 			// If there is already a start namespace, override it

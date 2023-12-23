@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015-2022 - pancake, nibble */
+/* radare - LGPL - Copyright 2015-2023 - pancake, nibble */
 
 #include <r_anal.h>
 
@@ -57,7 +57,7 @@ R_API bool r_anal_pin_set(RAnal *a, const char *name, const char *cmd) {
 	return sdb_add (a->sdb_pins, ckey, cmd, 0);
 }
 
-typedef void (*RAnalEsilPin)(RAnal *a);
+typedef void (*REsilPin)(RAnal *a);
 
 /* pin api */
 
@@ -121,7 +121,7 @@ R_API const char *r_anal_pin_call(RAnal *a, ut64 addr) {
 #if 0
 		const char *name;
 		if (name) {
-			RAnalEsilPin fcnptr = (RAnalEsilPin)
+			REsilPin fcnptr = (REsilPin)
 				sdb_ptr_get (DB, name, NULL);
 			if (fcnptr) {
 				fcnptr (a);
@@ -140,7 +140,7 @@ static bool cb_list(void *user, const char *k, const char *v) {
 		a->cb_printf ("aep %s @ %s\n", v, k);
 	//	a->cb_printf ("%s = %s\n", k, v);
 	} else {
-		if (!strncmp (k, "cmd.", 4)) {
+		if (r_str_startswith (k, "cmd.")) {
 			a->cb_printf ("\"aep %s=%s\"\n", k + 4, v);
 		} else {
 			a->cb_printf ("\"aep %s\"\n", k);

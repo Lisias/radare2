@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2021-2022 - condret */
+/* radare2 - LGPL - Copyright 2021-2023 - condret */
 
 #include <r_io.h>
 
@@ -73,6 +73,30 @@ R_API void r_io_bank_fini(RIO *io) {
 R_API RIOBank *r_io_bank_get(RIO *io, const ut32 bankid) {
 	r_return_val_if_fail (io && io->banks, NULL);
 	return (RIOBank *)r_id_storage_get (io->banks, bankid);
+}
+
+typedef struct {
+	RIO *io;
+	RIOBank *bank;
+	const char *name;
+} Boring;
+
+static bool find_bank(void *data, void *user, ut32 id) {
+	RIOBank *bank = (RIOBank *)user;
+	Boring *boo = (Boring *)data;
+	if (!strcmp (bank->name, boo->name)) {
+		boo->bank = bank;
+		return false;
+	}
+	return true;
+}
+
+R_API RIOBank *r_io_bank_get_byname(RIO *io, const char *bankname) {
+	r_return_val_if_fail (io && io->banks && bankname, NULL);
+	Boring boo = { .io = io, .name = bankname, .bank = NULL };
+	eprintf ("ooME (%s)\n", boo.name);
+	r_id_storage_foreach (io->banks, &find_bank, &boo);
+	return boo.bank;
 }
 
 R_API ut32 r_io_bank_first(RIO *io) {
@@ -315,7 +339,7 @@ R_API bool r_io_bank_map_priorize(RIO *io, const ut32 bankid, const ut32 mapid) 
 	}
 	return false;
 found:
-	if (iter == bank->maprefs->tail) {	//tail is top
+	if (iter == bank->maprefs->tail) { // tail is top
 		return r_io_map_get_by_ref (io, mapref) ? true : false;
 	}
 	RIOSubMap *sm = r_io_submap_new (io, mapref);
@@ -786,11 +810,10 @@ R_API bool r_io_bank_read_at(RIO *io, const ut32 bankid, ut64 addr, ut8 *buf, in
 		const ut64 buf_off = R_MAX (addr, r_io_submap_from (sm)) - addr;
 		const int read_len = R_MIN (r_io_submap_to ((&fake_sm)),
 					     r_io_submap_to (sm)) - (addr + buf_off) + 1;
-		if (map->perm & R_PERM_RELOC) {
-			ret &= map->reloc_map->read (io, map, addr + buf_off, &buf[buf_off], read_len);
-		} else {
-			const ut64 paddr = addr + buf_off - r_io_map_from (map) + map->delta;
-			ret &= (r_io_fd_read_at (io, map->fd, paddr, &buf[buf_off], read_len) == read_len);
+		const ut64 paddr = addr + buf_off - r_io_map_from (map) + map->delta;
+		ret &= (r_io_fd_read_at (io, map->fd, paddr, buf + buf_off, read_len) == read_len);
+		if (io->overlay) {
+			r_io_map_read_from_overlay (map, addr + buf_off, buf + buf_off, read_len);
 		}
 		// check return value here?
 		node = r_rbnode_next (node);
@@ -803,6 +826,7 @@ R_API bool r_io_bank_write_at(RIO *io, const ut32 bankid, ut64 addr, const ut8 *
 	r_return_val_if_fail (io, false);
 	RIOBank *bank = r_io_bank_get (io, bankid);
 	if (!bank) {
+		R_LOG_WARN ("Tfw no bank(id %u) in the io", bankid);
 		return false;
 	}
 	RIOSubMap fake_sm = {{0}};
@@ -832,13 +856,71 @@ R_API bool r_io_bank_write_at(RIO *io, const ut32 bankid, ut64 addr, const ut8 *
 		const ut64 buf_off = R_MAX (addr, r_io_submap_from (sm)) - addr;
 		const int write_len = R_MIN (r_io_submap_to ((&fake_sm)),
 					     r_io_submap_to (sm)) - (addr + buf_off) + 1;
-		if (map->perm & R_PERM_RELOC) {
-			ret &= map->reloc_map->write (io, map, addr + buf_off, &buf[buf_off], write_len);
+		if (io->overlay && io_map_get_overlay_intersects (map, bank->todo, addr + buf_off, write_len) &&
+			!r_queue_is_empty (bank->todo)) {
+			ut64 _buf_off = buf_off;
+			int _write_len = write_len;
+			do {
+				RInterval *itv = (RInterval *)r_queue_dequeue (bank->todo);
+				RInterval vitv = *itv;
+				vitv.addr += r_io_map_from (map);
+				if ((addr + _buf_off) < r_itv_begin (vitv)) {
+					const int w = r_itv_begin (vitv) - (addr + _buf_off);
+					const ut64 paddr = addr + _buf_off - r_io_map_from (map) + map->delta;
+					ret &= (r_io_fd_write_at (io, map->fd, paddr, &buf[_buf_off], w) == w);
+					_buf_off += w;
+					_write_len -= w;
+				}
+				// itv uses half-open intervals :(
+				const int w = R_MIN (_write_len, r_itv_end (vitv) - (addr + _buf_off));
+				ret &= r_io_map_write_to_overlay (map, addr + _buf_off, &buf[_buf_off], w);
+				_buf_off += w;
+				_write_len -= w;
+			} while (!r_queue_is_empty (bank->todo));
+			if (_write_len) {
+				const ut64 paddr = addr + _buf_off - r_io_map_from (map) + map->delta;
+				ret &= (r_io_fd_write_at (io, map->fd, paddr, &buf[_buf_off], _write_len) == _write_len);
+			}
 		} else {
 			const ut64 paddr = addr + buf_off - r_io_map_from (map) + map->delta;
 			ret &= (r_io_fd_write_at (io, map->fd, paddr, &buf[buf_off], write_len) == write_len);
 		}
 		// check return value here?
+		node = r_rbnode_next (node);
+		sm = node ? (RIOSubMap *)node->data : NULL;
+	}
+	return ret;
+}
+
+R_API bool r_io_bank_write_to_overlay_at(RIO *io, const ut32 bankid, ut64 addr, const ut8 *buf, int len) {
+	r_return_val_if_fail (io, false);
+	RIOBank *bank = r_io_bank_get (io, bankid);
+	if (!bank) {
+		R_LOG_WARN ("Tfw no bank(id: %u) in io", bankid);
+		return false;
+	}
+	RIOSubMap fake_sm = {{0}};
+	fake_sm.itv.addr = addr;
+	fake_sm.itv.size = len;
+	RRBNode *node;
+	if (bank->last_used && r_io_submap_contain (((RIOSubMap *)bank->last_used->data), addr)) {
+		node = bank->last_used;
+	} else {
+		node = _find_entry_submap_node (bank, &fake_sm);
+	}
+	RIOSubMap *sm = node ? (RIOSubMap *)node->data : NULL;
+	bool ret = true;
+	while (sm && r_io_submap_overlap ((&fake_sm), sm)) {
+		bank->last_used = node;
+		RIOMap *map = r_io_map_get_by_ref (io, &sm->mapref);
+		if (!map) {
+			// mapref doesn't belong to map
+			return false;
+		}
+		const ut64 buf_off = R_MAX (addr, r_io_submap_from (sm)) - addr;
+		const int write_len = R_MIN (r_io_submap_to ((&fake_sm)),
+					     r_io_submap_to (sm)) - (addr + buf_off) + 1;
+		ret &= r_io_map_write_to_overlay (map, addr + buf_off, &buf[buf_off], write_len);
 		node = r_rbnode_next (node);
 		sm = node ? (RIOSubMap *)node->data : NULL;
 	}
@@ -875,11 +957,12 @@ R_API int r_io_bank_read_from_submap_at(RIO *io, const ut32 bankid, ut64 addr, u
 		return -1;
 	}
 	const int read_len = R_MIN (len, r_io_submap_to (sm) - addr + 1);
-	if (map->perm & R_PERM_RELOC) {
-		return map->reloc_map->read (io, map, addr, buf, read_len);
-	}
 	const ut64 paddr = addr - r_io_map_from (map) + map->delta;
-	return r_io_fd_read_at (io, map->fd, paddr, buf, read_len);
+	const int ret = r_io_fd_read_at (io, map->fd, paddr, buf, read_len);
+	if (io->overlay) {
+		r_io_map_read_from_overlay (map, addr, buf, read_len);
+	}
+	return ret;
 }
 
 // writes only to single submap at addr and returns amount of bytes written.
@@ -911,12 +994,48 @@ R_API int r_io_bank_write_to_submap_at(RIO *io, const ut32 bankid, ut64 addr, co
 	if (!map || !(map->perm & R_PERM_W)) {
 		return -1;
 	}
-	const int write_len = R_MIN (len, r_io_submap_to (sm) - addr + 1);
-	if (map->perm & R_PERM_RELOC) {
-		return map->reloc_map->write (io, map, addr, buf, write_len);
+	ut64 buf_off = 0;
+	int write_len = R_MIN (len, r_io_submap_to (sm) - addr + 1);
+	int ret = 0;
+	if (io->overlay && io_map_get_overlay_intersects (map, bank->todo, addr, write_len) &&
+		!r_queue_is_empty (bank->todo)) {
+		do {
+			RInterval *itv = (RInterval *)r_queue_dequeue (bank->todo);
+			RInterval vitv = *itv;
+			vitv.addr += r_io_map_from (map);
+			if ((addr + buf_off) < r_itv_begin (vitv)) {
+				const int w = r_itv_begin (vitv) - (addr + buf_off);
+				const ut64 paddr = addr + buf_off - r_io_map_from (map) + map->delta;
+				const int _ret = r_io_fd_write_at (io, map->fd, paddr, &buf[buf_off], w);
+				ret += _ret;
+				if (_ret != w) {
+					while (r_queue_is_empty (bank->todo)) {
+						r_queue_dequeue (bank->todo);
+					}
+					if (_ret < 0) {
+						return _ret;
+					}
+					return ret;
+				}
+				buf_off += w;
+				write_len -= w;
+			}
+			const int w = R_MIN (write_len, r_itv_end (vitv) - (addr + buf_off));
+			r_io_map_write_to_overlay (map, addr + buf_off, &buf[buf_off], w);
+			buf_off += w;
+			write_len -= w;
+			ret += w;
+		} while (!r_queue_is_empty (bank->todo));
 	}
-	const ut64 paddr = addr - r_io_map_from (map) + map->delta;
-	return r_io_fd_write_at (io, map->fd, paddr, buf, write_len);
+	if (write_len) {
+		const ut64 paddr = addr + buf_off - r_io_map_from (map) + map->delta;
+		const int _ret = r_io_fd_write_at (io, map->fd, paddr, buf, write_len);
+		if (_ret < 0) {
+			return _ret;
+		}
+		ret += _ret;
+	}
+	return ret;
 }
 
 R_API RIOMap *r_io_bank_get_map_at(RIO *io, const ut32 bankid, ut64 addr) {
@@ -990,6 +1109,28 @@ R_API void r_io_bank_drain(RIO *io, const ut32 bankid) {
 		node = next;
 	}
 	bank->drain_me = false;
+}
+
+R_API bool r_io_bank_get_region_at(RIO *io, const ut32 bankid, RIORegion *region, ut64 addr) {
+	r_return_val_if_fail (io && region, false);
+	RIOBank *bank = r_io_bank_get (io, bankid);
+	if (!bank) {
+		return false;
+	}
+	r_io_bank_drain (io, bankid);
+	RRBNode *node;
+	if (bank->last_used && r_io_submap_contain (((RIOSubMap *)bank->last_used->data), addr)) {
+		node = bank->last_used;
+	} else {
+		if (!(node = r_crbtree_find_node (bank->submaps, &addr, _find_sm_by_vaddr_cb, NULL))) {
+			return false;
+		}
+	}
+	RIOSubMap *sm = (RIOSubMap *)node->data;
+	RIOMap *map = r_io_map_get_by_ref (io, &sm->mapref);
+	region->perm = map->perm;
+	region->itv = sm->itv;
+	return true;
 }
 
 R_IPI bool io_bank_has_map(RIO *io, const ut32 bankid, const ut32 mapid) {

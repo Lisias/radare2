@@ -9,7 +9,9 @@
 #define R_LOG_ORIGIN "anal.objc"
 
 #include <r_core.h>
+#include <r_vec.h>
 
+R_VEC_TYPE(RVecAnalRef, RAnalRef);
 
 typedef struct {
 	RCore *core;
@@ -80,11 +82,11 @@ static inline ut64 readQword(RCoreObjc *objc, ut64 addr, bool *success) {
 
 static void objc_analyze(RCore *core) {
 	R_LOG_INFO ("Analyzing code to find selref references");
-	r_core_cmd0 (core, "aar");
+	r_core_cmd_call (core, "aar");
 	if (!strcmp ("arm", r_config_get (core->config, "asm.arch"))) {
-		const bool emu_lazy = r_config_get_i (core->config, "emu.lazy");
+		const bool emu_lazy = r_config_get_b (core->config, "emu.lazy");
 		r_config_set_b (core->config, "emu.lazy", true);
-		r_core_cmd0 (core, "aae");
+		r_core_cmd_call (core, "aae");
 		r_config_set_b (core->config, "emu.lazy", emu_lazy);
 	}
 }
@@ -163,7 +165,7 @@ static bool objc_build_refs(RCoreObjc *objc) {
 	}
 	for (off = 0; off + word_size < ss_const && off + word_size < maxsize; off += word_size) {
 		ut64 va = va_const + off;
-		ut64 xrefs_to = r_read_le64 (buf + off);
+		ut64 xrefs_to = (word_size == 8)? r_read_le64 (buf + off): r_read_le32 (buf + off);
 		if (isValid (xrefs_to)) {
 			array_add (objc, va, xrefs_to);
 		}
@@ -174,7 +176,7 @@ static bool objc_build_refs(RCoreObjc *objc) {
 	}
 	for (off = 0; off + word_size < ss_selrefs && off + word_size < maxsize; off += word_size) {
 		ut64 va = va_selrefs + off;
-		ut64 xrefs_to = r_read_le64 (buf + off);
+		ut64 xrefs_to = (word_size == 8)? r_read_le64 (buf + off): r_read_le32 (buf + off);
 		if (isValid (xrefs_to)) {
 			array_add (objc, xrefs_to, va);
 		}
@@ -297,15 +299,15 @@ static bool objc_find_refs(RCore *core) {
 				break;
 			}
 
-			RList *list = r_anal_xrefs_get (core->anal, selRefVA);
-			if (list) {
-				RListIter *iter;
+			RVecAnalRef *xrefs = r_anal_xrefs_get (core->anal, selRefVA);
+			if (xrefs) {
 				RAnalRef *ref;
-				r_list_foreach (list, iter, ref) {
+				R_VEC_FOREACH (xrefs, ref) {
 					r_anal_xrefs_set (core->anal, ref->addr, funcVA, R_ANAL_REF_TYPE_CODE);
 					total_xrefs++;
 				}
 			}
+			RVecAnalRef_free (xrefs);
 		}
 	}
 

@@ -1,8 +1,8 @@
-/* radare - LGPL - Copyright 2019-2022 - pancake, oddcoder, Anton Kochkov */
+/* radare - LGPL - Copyright 2019-2023 - pancake, oddcoder, Anton Kochkov */
 
 #include <r_anal.h>
 #include <string.h>
-#include <sdb.h>
+#include <sdb/sdb.h>
 #include "base_types.h"
 
 #define KSZ 256
@@ -40,20 +40,22 @@ R_API void r_anal_remove_parsed_type(RAnal *anal, const char *name) {
 	if (!type) {
 		return;
 	}
-	int tmp_len = strlen (name) + strlen (type);
-	char *tmp = malloc (tmp_len + 1);
+
+	// Create a subkey before the call to r_type_del (which leaves the type string invalid)
+	char *subkey = r_str_newf ("%s.%s.", type, name);
 	r_type_del (TDB, name);
-	if (tmp) {
-		snprintf (tmp, tmp_len + 1, "%s.%s.", type, name);
-		SdbList *l = sdb_foreach_list (TDB, true);
-		ls_foreach (l, iter, kv) {
-			if (!strncmp (sdbkv_key (kv), tmp, tmp_len)) {
-				r_type_del (TDB, sdbkv_key (kv));
-			}
+
+	// TODO: This loop should be optimized
+	SdbList *l = sdb_foreach_list (TDB, true);
+	size_t subkey_len = strlen (subkey);
+	ls_foreach (l, iter, kv) {
+		const char *key = sdbkv_key (kv);
+		if (!strncmp (key, subkey, subkey_len)) {
+			r_type_del (TDB, key);
 		}
-		ls_free (l);
-		free (tmp);
 	}
+	ls_free (l);
+	free (subkey);
 }
 
 // RENAME TO r_anal_types_save(); // parses the string and imports the types
@@ -102,21 +104,21 @@ R_API RList *r_anal_types_from_fcn(RAnal *anal, RAnalFunction *fcn) {
 R_IPI void enum_type_case_free(void *e, void *user) {
 	(void)user;
 	RAnalEnumCase *cas = e;
-	free ((char *)cas->name);
+	free (cas->name);
 }
 
 R_IPI void struct_type_member_free(void *e, void *user) {
 	(void)user;
 	RAnalStructMember *member = e;
-	free ((char *)member->name);
-	free ((char *)member->type);
+	free (member->name);
+	free (member->type);
 }
 
 R_IPI void union_type_member_free(void *e, void *user) {
 	(void)user;
 	RAnalUnionMember *member = e;
-	free ((char *)member->name);
-	free ((char *)member->type);
+	free (member->name);
+	free (member->type);
 }
 
 static RAnalBaseType *get_enum_type(RAnal *anal, const char *sname) {

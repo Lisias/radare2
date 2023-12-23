@@ -1,22 +1,19 @@
-/* radare - LGPL - Copyright 2020-2021 pancake */
+/* radare - LGPL - Copyright 2020-2023 pancake */
 
 #include "r_lib.h"
 #include "r_core.h"
 #include "r_lang.h"
 #define USE_R2 1
 
+// XXX remove this global, but we need to improve spp to have context
 static R_TH_LOCAL RLang *Glang = NULL;
 #undef S_API
 // #include "../../../shlr/spp/spp.c"
 #include "../../../shlr/spp/spp.h"
-#include "spp_r2.inc"
+#include "spp_r2.inc.c"
 
-static bool lang_spp_init(RLang *l) {
-	Glang = l;
-	return true;
-}
-
-static bool lang_spp_run(RLang *lang, const char *code, int len) {
+static bool lang_spp_run(RLangSession *s, const char *code, int len) {
+	Glang = s->lang; // XXX
 	Output out;
 	out.fout = NULL;
 	out.cout = r_strbuf_new (NULL);
@@ -31,7 +28,7 @@ static bool lang_spp_run(RLang *lang, const char *code, int len) {
 	return true;
 }
 
-static bool lang_spp_file(RLang *lang, const char *file) {
+static bool lang_spp_file(RLangSession *lang, const char *file) {
 	size_t len;
 	char *code = r_file_slurp (file, &len);
 	if (code) {
@@ -45,13 +42,14 @@ static bool lang_spp_file(RLang *lang, const char *file) {
 #define r_lang_spp_example "Hello {{{r2 ?E Hello world}}}"
 
 static RLangPlugin r_lang_plugin_spp = {
-	.name = "spp",
+	.meta = {
+		.name = "spp",
+		.license = "MIT",
+		.author = "pancake",
+		.desc = "SPP template programs",
+	},
 	.ext = "spp",
-	.license = "MIT",
-	.author = "pancake",
-	.desc = "SPP template programs",
 	.example = r_lang_spp_example,
 	.run = lang_spp_run,
-	.init = (void*)lang_spp_init,
 	.run_file = (void*)lang_spp_file,
 };

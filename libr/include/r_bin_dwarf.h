@@ -303,7 +303,7 @@ extern "C" {
 #define DW_FORM_ref_sup4                0x1c
 #define DW_FORM_strp_sup                0x1d
 #define DW_FORM_data16                  0x1e
-#define DW_FORM_line_ptr                0x1f
+#define DW_FORM_line_strp               0x1f
 #define DW_FORM_ref_sig8                0x20
 #define DW_FORM_implicit_const          0x21
 #define DW_FORM_loclistx                0x22
@@ -623,6 +623,14 @@ extern "C" {
 #define DW_UT_lo_user                   0x80
 #define DW_UT_hi_user                   0xff
 
+#define DW_LNCT_path            0x0001
+#define DW_LNCT_directory_index 0x0002
+#define DW_LNCT_timestamp       0x0003
+#define DW_LNCT_size            0x0004
+#define DW_LNCT_MD5             0x0005
+#define DW_LNCT_lo_user         0x2000
+#define DW_LNCT_hi_user         0x3fff
+
 typedef struct {
 	ut32 total_length;
 	ut16 version;
@@ -847,7 +855,7 @@ typedef struct r_bin_dwarf_loc_list_t {
 
 #define r_bin_dwarf_line_new(o,a,f,l) o->address=a, o->file = strdup (r_str_get (f)), o->line = l, o->column =0,o
 
-R_API RList *r_bin_dwarf_parse_aranges(RBin *a, int mode);
+R_API void r_bin_dwarf_parse_aranges(RBin *a, int mode);
 R_API RList *r_bin_dwarf_parse_line(RBin *a, int mode);
 R_API RBinDwarfDebugAbbrev *r_bin_dwarf_parse_abbrev(RBin *a, int mode);
 R_API RBinDwarfDebugInfo *r_bin_dwarf_parse_info(RBinDwarfDebugAbbrev *da, RBin *a, int mode);

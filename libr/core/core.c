@@ -1,17 +1,18 @@
-/* radare2 - LGPL - Copyright 2009-2022 - pancake */
+/* radare2 - LGPL - Copyright 2009-2023 - pancake */
+
+#define R_LOG_ORIGIN "core"
 
 #include <r_core.h>
-#include <config.h>
-#if __UNIX__
+#include <r_vec.h>
+#if R2__UNIX__
 #include <signal.h>
 #endif
 
 #define DB core->sdb
 
-extern void r_core_echo(RCore *core, const char *input);
-extern bool r_core_is_project(RCore *core, const char *name);
-
 R_LIB_VERSION (r_core);
+
+R_VEC_TYPE(RVecAnalRef, RAnalRef);
 
 static ut64 letter_divs[R_CORE_ASMQJMPS_LEN_LETTERS - 1] = {
 	R_CORE_ASMQJMPS_LETTERS * R_CORE_ASMQJMPS_LETTERS * R_CORE_ASMQJMPS_LETTERS * R_CORE_ASMQJMPS_LETTERS,
@@ -23,11 +24,11 @@ static ut64 letter_divs[R_CORE_ASMQJMPS_LEN_LETTERS - 1] = {
 static int on_fcn_new(RAnal *_anal, void* _user, RAnalFunction *fcn) {
 	RCore *core = (RCore*)_user;
 	const char *cmd = r_config_get (core->config, "cmd.fcn.new");
-	if (cmd && *cmd) {
+	if (R_STR_ISNOTEMPTY (cmd)) {
 		ut64 oaddr = core->offset;
 		ut64 addr = fcn->addr;
 		r_core_seek (core, addr, true);
-		r_core_cmd0 (core, cmd);
+		r_core_cmd0 (core, cmd); // TODO: use r_core_cmd_at
 		r_core_seek (core, oaddr, true);
 	}
 	return 0;
@@ -36,11 +37,11 @@ static int on_fcn_new(RAnal *_anal, void* _user, RAnalFunction *fcn) {
 static int on_fcn_delete(RAnal *_anal, void* _user, RAnalFunction *fcn) {
 	RCore *core = (RCore*)_user;
 	const char *cmd = r_config_get (core->config, "cmd.fcn.delete");
-	if (cmd && *cmd) {
+	if (R_STR_ISNOTEMPTY (cmd)) {
 		ut64 oaddr = core->offset;
 		ut64 addr = fcn->addr;
 		r_core_seek (core, addr, true);
-		r_core_cmd0 (core, cmd);
+		r_core_cmd0 (core, cmd); // use r_core_cmd_at
 		r_core_seek (core, oaddr, true);
 	}
 	return 0;
@@ -49,12 +50,12 @@ static int on_fcn_delete(RAnal *_anal, void* _user, RAnalFunction *fcn) {
 static int on_fcn_rename(RAnal *_anal, void* _user, RAnalFunction *fcn, const char *oname) {
 	RCore *core = (RCore*)_user;
 	const char *cmd = r_config_get (core->config, "cmd.fcn.rename");
-	if (cmd && *cmd) {
+	if (R_STR_ISNOTEMPTY (cmd)) {
 		// XXX: wat do with old name here?
 		ut64 oaddr = core->offset;
 		ut64 addr = fcn->addr;
 		r_core_seek (core, addr, true);
-		r_core_cmd0 (core, cmd);
+		r_core_cmd0 (core, cmd); // use r_core_cmd_at
 		r_core_seek (core, oaddr, true);
 	}
 	return 0;
@@ -62,8 +63,8 @@ static int on_fcn_rename(RAnal *_anal, void* _user, RAnalFunction *fcn, const ch
 
 static void r_core_debug_breakpoint_hit(RCore *core, RBreakpointItem *bpi) {
 	const char *cmdbp = r_config_get (core->config, "cmd.bp");
-	const bool cmdbp_exists = (cmdbp && *cmdbp);
-	const bool bpcmd_exists = (bpi->data && bpi->data[0]);
+	const bool cmdbp_exists = R_STR_ISNOTEMPTY (cmdbp);
+	const bool bpcmd_exists = R_STR_ISNOTEMPTY (bpi->data);
 	const bool may_output = (cmdbp_exists || bpcmd_exists);
 	if (may_output) {
 		r_cons_push ();
@@ -82,8 +83,7 @@ static void r_core_debug_breakpoint_hit(RCore *core, RBreakpointItem *bpi) {
 
 static void r_core_debug_syscall_hit(RCore *core) {
 	const char *cmdhit = r_config_get (core->config, "cmd.onsyscall");
-
-	if (cmdhit && cmdhit[0] != 0) {
+	if (R_STR_ISNOTEMPTY (cmdhit)) {
 		r_core_cmd0 (core, cmdhit);
 		r_cons_flush ();
 	}
@@ -132,7 +132,7 @@ R_API ut64 r_core_get_asmqjmps(RCore *core, const char *str) {
 	}
 	if (core->is_asmqjmps_letter) {
 		int i, pos = 0;
-		int len = strlen (str);
+		const int len = strlen (str);
 		for (i = 0; i < len - 1; i++) {
 			if (!isupper ((ut8)str[i])) {
 				return UT64_MAX;
@@ -149,7 +149,7 @@ R_API ut64 r_core_get_asmqjmps(RCore *core, const char *str) {
 			return core->asmqjmps[pos + 1];
 		}
 	} else if (str[0] > '0' && str[1] <= '9') {
-		int pos = str[0] - '0';
+		const int pos = str[0] - '0';
 		if (pos <= core->asmqjmps_count) {
 			return core->asmqjmps[pos];
 		}
@@ -206,26 +206,29 @@ R_API char* r_core_add_asmqjmp(RCore *core, ut64 addr) {
  * multiletter shortcut of the form XYWZu and returned (see r_core_get_asmqjmps
  * for more info). Otherwise, the shortcut is the string representation of pos. */
 R_API void r_core_set_asmqjmps(RCore *core, char *str, size_t len, int pos) {
+	r_return_if_fail (core && str && pos > 0);
 	if (core->is_asmqjmps_letter) {
 		int i, j = 0;
-		// if (pos > 0) {
-			pos --;
-		////  }
+		pos --;
 		for (i = 0; i < R_CORE_ASMQJMPS_LEN_LETTERS - 1; i++) {
-			int div = pos / letter_divs[i];
+			const int div = pos / letter_divs[i];
 			pos %= letter_divs[i];
 			if (div > 0 && j < len) {
 				str[j++] = 'A' + div - 1;
 			}
 		}
 		if (j < len) {
-			int div = pos % R_CORE_ASMQJMPS_LETTERS;
+			const int div = pos % R_CORE_ASMQJMPS_LETTERS;
 			str[j++] = 'a' + div;
 		}
 		str[j] = '\0';
 	} else {
 		snprintf (str, len, "%d", pos);
 	}
+}
+
+static void core_help(RCore *core, RCoreHelpMessage help) {
+	r_core_cmd_help (core, help);
 }
 
 static void setab(RCore *core, const char *arch, int bits) {
@@ -306,15 +309,42 @@ static bool __syncDebugMaps(RCore *core) {
 	return false;
 }
 
+R_API char *r_core_cmd_call_str_at(RCore *core, ut64 addr, const char *cmd) {
+	r_return_val_if_fail (core && core->cons, NULL);
+	r_cons_push ();
+	core->cons->context->noflush = true;
+	core->cons->context->cmd_str_depth++;
+	if (cmd && r_core_cmd_call_at (core, addr, cmd) == -1) {
+		//eprintf ("Invalid command: %s\n", cmd);
+		if (--core->cons->context->cmd_str_depth == 0) {
+			core->cons->context->noflush = false;
+			r_cons_flush ();
+		}
+		r_cons_pop ();
+		return NULL;
+	}
+	if (--core->cons->context->cmd_str_depth == 0) {
+		core->cons->context->noflush = false;
+	}
+	r_cons_filter ();
+	const char *static_str = r_cons_get_buffer ();
+	char *retstr = strdup (r_str_get (static_str));
+	r_cons_pop ();
+	r_cons_echo (NULL);
+	return retstr;
+}
+
 R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
 	bnd->core = core;
 	bnd->bphit = (RCoreDebugBpHit)r_core_debug_breakpoint_hit;
 	bnd->syshit = (RCoreDebugSyscallHit)r_core_debug_syscall_hit;
 	bnd->cmd = (RCoreCmd)r_core_cmd0;
 	bnd->cmdf = (RCoreCmdF)r_core_cmdf;
+	bnd->callat = (RCoreCallAt)r_core_cmd_call_str_at;
 	bnd->cmdstr = (RCoreCmdStr)r_core_cmd_str;
 	bnd->cmdstrf = (RCoreCmdStrF)r_core_cmd_strf;
-	bnd->puts = (RCorePuts)r_cons_strcat;
+	bnd->help = (RCoreBindHelp)core_help;
+	bnd->puts = (RCorePuts)r_cons_print;
 	bnd->setab = (RCoreSetArchBits)setab;
 	bnd->getName = (RCoreGetName)getName;
 	bnd->getNameDelta = (RCoreGetNameDelta)getNameDelta;
@@ -338,26 +368,28 @@ R_API RCore *r_core_cast(void *p) {
 
 static ut64 getref(RCore *core, int n, char t, int type) {
 	RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, 0);
-	RListIter *iter;
-	RAnalRef *r;
-	int i = 0;
 	if (!fcn) {
 		return UT64_MAX;
 	}
-	RList *list = (t == 'r')
+
+	RVecAnalRef *anal_refs = (t == 'r')
 		? r_anal_function_get_refs (fcn)
 		: r_anal_function_get_xrefs (fcn);
-	r_list_foreach (list, iter, r) {
-		if (r->type == type) {
-			if (i == n) {
-				ut64 addr = r->addr;
-				r_list_free (list);
-				return addr;
+	int i = 0;
+	if (anal_refs) {
+		RAnalRef *r;
+		R_VEC_FOREACH (anal_refs, r) {
+			if (r->type == type) {
+				if (i == n) {
+					ut64 addr = r->addr;
+					RVecAnalRef_free (anal_refs);
+					return addr;
+				}
+				i++;
 			}
-			i++;
 		}
 	}
-	r_list_free (list);
+	RVecAnalRef_free (anal_refs);
 	return UT64_MAX;
 }
 
@@ -485,7 +517,7 @@ static ut64 numvar_instruction(RCore *core, const char *input) {
 	ut64 addr = core->offset;
 	// N forward instructions
 	ut8 data[32];
-	int i, ret;
+	int i;
 	ut64 val = addr;
 	int n = 1;
 	if (input[0] == '{') {
@@ -497,15 +529,14 @@ static ut64 numvar_instruction(RCore *core, const char *input) {
 	}
 	for (i = 0; i < n; i++) {
 		r_io_read_at (core->io, val, data, sizeof (data));
-		RAnalOp op;
-		ret = r_anal_op (core->anal, &op, val, data,
+		RAnalOp op = {0};
+		int ret = r_anal_op (core->anal, &op, val, data,
 			sizeof (data), R_ARCH_OP_MASK_BASIC);
 		if (ret < 1) {
-			ret = 1;
+			R_LOG_DEBUG ("cannot decode at 0x%08"PFMT64x, val);
 		}
 		val += op.size;
 		r_anal_op_fini (&op);
-		//val += ret;
 	}
 	return val;
 
@@ -517,7 +548,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 	char *ptr, *bptr, *out = NULL;
 	RFlagItem *flag;
 	RBinSection *s;
-	RAnalOp op = {0};
+	RAnalOp op;
 	ut64 ret = 0;
 
 	if (ok) {
@@ -558,10 +589,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 {
 		ut64 n = 0LL;
 		int refsz = core->rasm->config->bits / 8;
-		const char *p = NULL;
-		if (strlen (str) > 5) {
-			p = strchr (str + 5, ':');
-		}
+		const char *p = strchr (str, ':');
 		if (p) {
 			refsz = atoi (str + 1);
 			str = p;
@@ -619,6 +647,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 		case 'm':
 		case 'v':
 		case 'l':
+			r_anal_op_init (&op);
 			r_anal_op (core->anal, &op, core->offset, core->block, core->blocksize, R_ARCH_OP_MASK_BASIC);
 			r_anal_op_fini (&op); // we don't need strings or pointers, just values, which are not nullified in fini
 			break;
@@ -684,14 +713,16 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 			}
 			return 0;
 		case 'r': // $r
-			if (str[2] == '{') {
+			if (str[2] == '{' || str[2] == ':') {
 				bptr = strdup (str + 3);
-				ptr = strchr (bptr, '}');
-				if (!ptr) {
-					free (bptr);
-					break;
+				if (str[2] == '{') {
+					ptr = strchr (bptr, '}');
+					if (!ptr) {
+						free (bptr);
+						break;
+					}
+					*ptr = 0;
 				}
-				*ptr = 0;
 				if (r_config_get_b (core->config, "cfg.debug")) {
 					if (r_debug_reg_sync (core->dbg, R_REG_TYPE_GPR, false)) {
 						RRegItem *r = r_reg_get (core->dbg->reg, bptr, -1);
@@ -826,7 +857,6 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 		case 'o': { // $o
 			RBinSection *s = r_bin_get_section_at (r_bin_cur_object (core->bin), core->offset, true);
 			return s ? core->offset - s->vaddr + s->paddr : core->offset;
-			break;
 		}
 		case 'O': // $O
 			if (core->print->cur_enabled) {
@@ -846,7 +876,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				/* function bounds (uppercase) */
 				case 'B': return fcn->addr; // begin
 				case 'E': return r_anal_function_max_addr (fcn); // end
-				case 'S': return (str[3]=='S') ? r_anal_function_realsize (fcn) : r_anal_function_linear_size (fcn);
+				case 'S': return (str[3] == 'S') ? r_anal_function_realsize (fcn) : r_anal_function_linear_size (fcn);
 				case 'I': return fcn->ninstr;
 				/* basic blocks (lowercase) */
 				case 'b': return bbBegin (fcn, core->offset);
@@ -865,7 +895,9 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 		}
 		break;
 	default:
-		if (*str >= 'A' || *str == ':' || *str == '_') {
+		{
+		const char str0 = *str;
+		if (str0 >= 'A' || str0 == ':' || str0 == '_') {
 			// NOTE: functions override flags
 			RAnalFunction *fcn = r_anal_get_function_byname (core->anal, str);
 			if (fcn) {
@@ -915,6 +947,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				return ret;
 			}
 		}
+		}
 		break;
 	}
 
@@ -939,12 +972,12 @@ static const char *ms_argv[] = {
 static const char *radare_argv[] = {
 	"whereis", "which", "ls", "rm", "mkdir", "pwd", "cat", "sort", "uniq", "join", "less", "exit", "quit",
 	"#?", "#!", "#sha1", "#crc32", "#pcprint", "#sha256", "#sha512", "#md4", "#md5",
-	"#!python", "#!vala", "#!pipe",
+	"#!python", "#!vala", "#!pipe", "#!qjs", "#!tiny",
 	"*?", "*", "$",
 	"(", "(*", "(-", "()", ".?", ".", "..", "...", ".:", ".--", ".-", ".!", ".(", "./", ".*",
 	"_?", "_",
 	"=?", "=", "=<", "=!", "=+", "=-", "==", "=!=", "!=!", "=:", "=&:",
-	"=g?", "=g", "=g!", "=h?", "=h", "=h-", "=h--", "=h*", "=h&", "=H?", "=H", "=H&",
+	"=g?", "=g", "=h?", "=h", "=h-", "=h--", "=h*", "=h&", "=H?", "=H", "=H&",
 	"<",
 	"/?", "/", "/j", "/j!", "/j!x", "/+", "//", "/a", "/a1", "/ab", "/ad", "/aa", "/as", "/asl", "/at", "/atl", "/af", "/afl", "/ae", "/aej", "/ai", "/aij",
 	"/c", "/ca", "/car", "/d", "/e", "/E", "/Ej", "/f", "/F", "/g", "/gg", "/h", "/ht", "/i", "/m", "/mb", "/mm",
@@ -1033,7 +1066,7 @@ static const char *radare_argv[] = {
 	"dts?", "dts", "dts+", "dts-", "dtsf", "dtst", "dtsC", "dtt",
 	"dw",
 	"dx?", "dx", "dxa", "dxe", "dxr", "dxs",
-	"e?", "e", "e-", "e*", "e!", "ec", "ee?", "ee", "?ed", "ed", "ej", "env", "er", "es", "et", "ev", "evj",
+	"e?", "e", "-e", "-i", "e-", "e*", "e!", "ec", "ee?", "ee", "?ed", "ed", "ej", "env", "er", "es", "et", "ev", "evj",
 	"ec?", "ec", "ec*", "ecd", "ecr", "ecs", "ecj", "ecc", "eco", "ecp", "ecn",
 	"ecH?", "ecH", "ecHi", "ecHw", "ecH-",
 	"f?", "f", "f.", "f*", "f-", "f--", "f+", "f=", "fa", "fb", "fc?", "fc", "fC", "fd", "fe-", "fe",
@@ -1052,8 +1085,8 @@ static const char *radare_argv[] = {
 	"l",
 	"L?", "L", "L-", "Ll", "LL", "La", "Lc", "Ld", "Lh", "Li", "Lo",
 	"m?", "m", "m*", "ml", "m-", "md", "mf?", "mf", "mg", "mo", "mi", "mp", "ms", "my",
-	"o?", "o", "o-", "o--", "o+", "oa", "oa-", "oq", "o*", "o.", "o=",
-	"ob?", "ob", "ob*", "obo", "oba", "obf", "obj", "obr", "ob-", "ob-*",
+	"o?", "o", "o-", "o--", "o+", "oe", "oa", "oa-", "oq", "oqq", "o*", "o**", "o.", "o=",
+	"ob?", "ob", "ob*", "obo", "oba", "obf", "obj", "obr", "ob-", "ob-*", "obi",
 	"oc", "of", "oi", "oj", "oL", "om", "on",
 	"oo?", "oo", "oo+", "oob", "ood", "oom", "oon", "oon+", "oonn", "oonn+",
 	"op",  "opn", "opp", "opr", "ox",
@@ -1065,7 +1098,7 @@ static const char *radare_argv[] = {
 	"pd?", "pd", "pd--", "pD", "pda", "pdb", "pdc", "pdC", "pdf", "pdi", "pdj", "pdJ",
 	"pdk", "pdl", "pdp", "pdr", "pdr.", "pdR", "pds?", "pds", "pdsb", "pdsf", "pdt",
 	"pD",
-	"pf?", "pf", "pf??", "pf???", "pf.", "pfj", "pfj.", "pf*", "pf*.", "pfd", "pfd.",
+	"pf?", "pf", "pf??", "pf???", "pf.", "pfj", "pfj.", "pf*", "pf*.", "pfc", "pfc.", "pfd", "pfd.",
 	"pfo", "pfq", "pfv", "pfv.", "pfs", "pfs.",
 	"pF?", "pF", "pFa", "pFaq", "pFo", "pFp", "pFx",
 	"pg?", "pg", "pg*", "pg-*",
@@ -1115,7 +1148,7 @@ static const char *radare_argv[] = {
 	"x?", "x", "x/", "x0", "xa", "xA?", "xA", "xb", "xc", "xd?", "xd", "xd2", "xd4", "xd8",
 	"xe", "xf", "xh", "xH", "xi", "xl", "xo", "xq", "xq", "xQ", "xQq", "xr", "xrj",
 	"xs", "xt", "xt*", "xt.", "xw", "xW", "xWq", "xx", "xX",
-	"y?", "y", "yz", "yp", "yx", "ys", "yt", "ytf", "yf", "yfa", "yfx", "yw", "ywx", "yy",
+	"y?", "y", "yz", "yp", "yx", "ys", "yt", "ytf", "yf", "yfa", "yfx", "yw", "ywx", "yy", "yr",
 	"z?", "z", "z*", "zj", "z-", "z-*",
 	"za?", "za??", "za", "zaf", "zaF", "zg",
 	"zo?", "zo", "zoz", "zos",
@@ -1246,7 +1279,6 @@ static void autocomplete_alias(RLineCompletion *completion, RCmd *cmd, const cha
 	const int needle_len = strlen (needle);
 	int i;
 
-
 	c.needle = needle;
 	c.needle_len = needle_len;
 	// Filter out command aliases?
@@ -1301,31 +1333,29 @@ static void autocomplete_process_path(RLineCompletion *completion, const char *s
 	if (!path) {
 		goto out;
 	}
-
 #if 0
 	if (path[0] == '>') {
 		is_pipe = true;
 		path++;
 	}
 #endif
-
 	lpath = r_str_new (path);
-#if __WINDOWS__
+#if R2__WINDOWS__
 	r_str_replace_ch (lpath, '/', '\\', true);
 #endif
 	p = (char *)r_str_last (lpath, R_SYS_DIR);
 	if (p) {
 		*p = 0;
 		if (p == lpath) { // /xxx
-#if __WINDOWS__
+#if R2__WINDOWS__
 			dirname = strdup ("\\.\\");
 #else
 			dirname = r_str_new (R_SYS_DIR);
 #endif
 		} else if (lpath[0] == '~' && lpath[1]) { // ~/xxx/yyy
-			dirname = r_str_home (lpath + 2);
+			dirname = r_file_home (lpath + 2);
 		} else if (lpath[0] == '~') { // ~/xxx
-			if (!(home = r_str_home (NULL))) {
+			if (!(home = r_file_home (NULL))) {
 				goto out;
 			}
 			dirname = r_str_newf ("%s%s", home, R_SYS_DIR);
@@ -1334,7 +1364,7 @@ static void autocomplete_process_path(RLineCompletion *completion, const char *s
 			dirname = r_str_newf ("%s%s", lpath, R_SYS_DIR);
 		} else { // xxx/yyy
 			char *fmt = ".%s%s%s";
-#if __WINDOWS__
+#if R2__WINDOWS__
 			if (strchr (path, ':')) {
 				fmt = "%.0s%s%s";
 			}
@@ -1919,12 +1949,26 @@ static bool find_autocomplete(RCore *core, RLineCompletion *completion, RLineBuf
 	return true;
 }
 
+static bool check_tabhelp_exceptions(const char *s) {
+	if (r_str_startswith (s, "pf.")) {
+		return true;
+	}
+	if (r_str_startswith (s, "pfc.")) {
+		return true;
+	}
+	if (r_str_startswith (s, "pfj.")) {
+		return true;
+	}
+	return false;
+}
+
 R_API void r_core_autocomplete(R_NULLABLE RCore *core, RLineCompletion *completion, RLineBuffer *buf, RLinePromptType prompt_type) {
 	if (!core) {
 		autocomplete_default (core, completion, buf);
 		return;
 	}
-	if (r_config_get_b (core->config, "scr.prompt.tabhelp")) {
+	const bool tabhelp_exception = check_tabhelp_exceptions (buf->data);
+	if (!tabhelp_exception && r_config_get_b (core->config, "scr.prompt.tabhelp")) {
 		if (buf->data[0] != '$' // handle aliases below
 				&& strncmp (buf->data, "#!", 2) // rlang help fails
 				&& !strchr (buf->data, ' ')) {
@@ -2024,11 +2068,12 @@ R_API void r_core_autocomplete(R_NULLABLE RCore *core, RLineCompletion *completi
 			ADDARG ("creg");
 			ADDARG ("num");
 			ADDARG ("mov");
-			ADDARG ("func_var");
-			ADDARG ("func_var_type");
-			ADDARG ("func_var_addr");
-			ADDARG ("widget_bg");
-			ADDARG ("widget_sel");
+			ADDARG ("var");
+			ADDARG ("var.type");
+			ADDARG ("var.addr");
+			ADDARG ("var.name");
+			ADDARG ("widget.bg");
+			ADDARG ("widget.sel");
 			ADDARG ("ai.read");
 			ADDARG ("ai.write");
 			ADDARG ("ai.exec");
@@ -2047,16 +2092,22 @@ R_API void r_core_autocomplete(R_NULLABLE RCore *core, RLineCompletion *completi
 			ADDARG ("gui.cflow");
 			ADDARG ("gui.dataoffset");
 			ADDARG ("gui.background");
-			ADDARG ("gui.alt_background");
+			ADDARG ("gui.background2");
 			ADDARG ("gui.border");
+			ADDARG ("diff.unknown");
+			ADDARG ("diff.new");
+			ADDARG ("diff.match");
+			ADDARG ("diff.unmatch");
 		}
-	} else if (!strncmp (buf->data, "pf.", 3)
-			|| !strncmp (buf->data, "pf*.", 4)
-			|| !strncmp (buf->data, "pfd.", 4)
-			|| !strncmp (buf->data, "pfv.", 4)
-			|| !strncmp (buf->data, "pfj.", 4)) {
+	} else if (r_str_startswith (buf->data, "pf.")
+			|| r_str_startswith (buf->data, "pf*.")
+			|| r_str_startswith (buf->data, "pfd.")
+			|| r_str_startswith (buf->data, "pfc.")
+			|| r_str_startswith (buf->data, "pfv.")
+			|| r_str_startswith (buf->data, "pfj.")
+		  ) {
 		char pfx[2];
-		int chr = (buf->data[2]=='.')? 3: 4;
+		int chr = (buf->data[2] == '.')? 3: 4;
 		if (chr == 4) {
 			pfx[0] = buf->data[2];
 			pfx[1] = 0;
@@ -2164,6 +2215,9 @@ R_API int r_core_fgets(char *buf, int len) {
 	r_return_val_if_fail (buf, -1);
 	RCons *cons = r_cons_singleton ();
 	RLine *rli = cons->line;
+#if R2_590
+	cons->maxlength = len; /// R2_590
+#endif
 	bool prompt = cons->context->is_interactive;
 	buf[0] = '\0';
 	if (prompt) {
@@ -2179,6 +2233,11 @@ R_API int r_core_fgets(char *buf, int len) {
 	const char *ptr = r_line_readline ();
 	if (!ptr) {
 		return -1;
+	}
+	if (cons->line->buffer.length >= len - 2) {
+		R_LOG_ERROR ("input is too large");
+		*buf = 0;
+		return 0;
 	}
 	return r_str_ncpy (buf, ptr, len - 1);
 }
@@ -2411,7 +2470,7 @@ R_API char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, PJ *pj, int de
 	}
 	if (type) {
 		const char *c = r_core_anal_optype_colorfor (core, fcn? fcn->addr: value, value, true);
-		const char *cend = (c && *c) ? Color_RESET: "";
+		const char *cend = (R_STR_ISNOTEMPTY (c)) ? Color_RESET: "";
 		if (!c) {
 			c = "";
 		}
@@ -2477,7 +2536,7 @@ R_API char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, PJ *pj, int de
 				r_strbuf_appendf (s, "%sW%s ", c, cend);
 			}
 			if (type & R_ANAL_ADDR_TYPE_EXEC) {
-				RAsmOp op;
+				RAnalOp op;
 				ut8 buf[32];
 				r_strbuf_appendf (s, "%sX%s ", c, cend);
 				/* instruction disassembly */
@@ -2543,7 +2602,6 @@ R_API char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, PJ *pj, int de
 				break;
 			}
 		}
-
 	}
 	if ((type & R_ANAL_ADDR_TYPE_READ) && !(type & R_ANAL_ADDR_TYPE_EXEC) && depth) {
 		// Try to telescope further, but only several levels deep.
@@ -2574,23 +2632,7 @@ R_API char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, PJ *pj, int de
 	return res;
 }
 
-R_API char *r_core_anal_get_comments(RCore *core, ut64 addr) {
-	if (core) {
-		const char *type = r_meta_get_string (core->anal, R_META_TYPE_VARTYPE, addr);
-		const char *cmt = r_meta_get_string (core->anal, R_META_TYPE_COMMENT, addr);
-		if (type && cmt) {
-			return r_str_newf ("%s %s", type, cmt);
-		}
-		if (type) {
-			return strdup (type);
-		}
-		if (cmt) {
-			return strdup (cmt);
-		}
-	}
-	return NULL;
-}
-
+// XXX must be deprecated
 static R_TH_LOCAL char *const_color = NULL;
 
 R_API const char *colorforop(RCore *core, ut64 addr) {
@@ -2666,6 +2708,11 @@ static void r_core_setenv(RCore *core) {
 	char *h = r_xdg_datadir ("prefix/bin"); // support \\ on windows :?
 	char *n = r_str_newf ("%s%s%s", h, R_SYS_ENVSEP, e);
 	r_sys_setenv ("PATH", n);
+	{
+		char *cpstr = r_str_newf ("%p", core);
+		r_sys_setenv ("R2CORE", cpstr);
+		free (cpstr);
+	}
 	free (n);
 	free (h);
 	free (e);
@@ -2723,31 +2770,32 @@ static void __foreach(RCore *core, const char **cmds, int type) {
 }
 
 static void __init_autocomplete_default(RCore* core) {
+	// TODO: if we sort those strings alphabetically we can probably break earlier
 	const char *fcns[] = {
-		"afi", "afcf", "afn", NULL
+		"afi", "afcf", "afn", "afm", NULL
 	};
 	const char *seeks[] = {
 		"s", NULL
 	};
 	const char *flags[] = {
 		"*", "s", "s+", "b", "f", "fg", "?", "?v", "ad", "bf", "c1", "db", "dbw",
-		"f-", "fr", "tf", "/a", "/v", "/r", "/re", "aav", "aep", "aef", "afb",
+		"f-", "fr", "tf", "/a", "/v", "/r", "/re", "aav", "aep", "aef", "afb", "o=",
 		"afc", "axg", "axt", "axf", "dcu", "ag", "agfl", "aecu", "aesu", "aeim", NULL
 	};
 	const char *evals[] = {
-		"e", "ee", "et", "e?", "e!", "ev", "evj", NULL
+		"-e", "e", "ee", "et", "e?", "e!", "ev", "evj", NULL
 	};
 	const char *breaks[] = {
 		"db-", "dbc", "dbC", "dbd", "dbe", "dbs", "dbi", "dbte", "dbtd", "dbts", NULL
 	};
 	const char *files[] = {
-		".", "..", ".*", "/F", "/m", "!", "!!", "#!c", "#!v", "#!cpipe", "#!vala", "v.",
-		"#!rust", "#!zig", "#!pipe", "#!python", "aeli", "arp", "arpg", "dmd", "drp", "drpg", "o",
-		"idp", "idpi", "L", "obf", "o+", "oc", "of", "r2", "rabin2", "rasm2", "rahash2", "rax2",
-		"rafind2", "cd", "ls", "on", "wf", "rm", "wF", "wp", "Sd", "Sl", "to", "pm",
+		".", "..", ".*", "/F", "/m", "!", "!!", "#!c", "#!v", "#!cpipe", "#!qjs", "#!tiny", "#!vala", "v.",
+		"#!rust", "#!zig", "#!pipe", "#!python", "aeli", "arp", "arpg", "dmd", "drp", "drpg", "o", "oe", "ot", "o+", "o++", "on",
+		"idp", "idpi", "L", "obf", "o+", "oc", "of", "r2", "rabin2", "rasm2", "rahash2", "rax2", "wff",
+		"rafind2", "cd", "ls", "lua", "on", "wf", "rm", "wF", "wp", "Sd", "Sl", "to", "pm",
 		"/m", "zos", "zfd", "zfs", "zfz", "cat", "wta", "wtf", "wxf", "dml", "dd", "dd+",
-		"vi", "vim", "nvi", "neovim", "nvim", "nano",
-#if __WINDOWS__
+		"vi", "vim", "nvi", "neovim", "nvim", "nano", "-i", "yr",
+#if R2__WINDOWS__
 		"notepad",
 #endif
 		"less", "head", "tail", NULL
@@ -2821,6 +2869,11 @@ static char *hasrefs_cb(void *user, ut64 addr, int mode) {
 	}
 	core->offset = addr;
 	char *res = r_core_anal_hasrefs ((RCore *)user, addr, mode);
+	if (R_STR_ISEMPTY (res)) {
+		free (res);
+		addr &= 0xffffffffffffULL;
+		res = r_core_anal_hasrefs ((RCore *)user, addr, mode);
+	}
 	return res;
 }
 
@@ -2923,7 +2976,7 @@ R_API RFlagItem *r_core_flag_get_by_spaces(RFlag *f, ut64 off) {
 		NULL);
 }
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 // XXX move to rcons?
 static int win_eprintf(const char *format, ...) {
 	va_list ap;
@@ -2969,8 +3022,13 @@ static RThreadFunctionRet thchan_handler(RThread *th) {
 		}
 		char *res = r_core_cmd_str (core, (const char *)cm->msg);
 		free (cm->msg);
-		cm->msg = (ut8 *)res;
-		cm->len = strlen (res) + 1;
+		if (res) {
+			cm->msg = (ut8 *)res;
+			cm->len = strlen (res) + 1;
+		} else {
+			cm->msg = NULL;
+			cm->len = 0;
+		}
 		r_th_channel_post (core->chan, cm);
 		r_th_sem_post (cm->sem);
 	}
@@ -2981,21 +3039,88 @@ static bool cbcore(void *user, int type, const char *origin, const char *msg) {
 	if (!msg) {
 		return false;
 	}
+	if (!origin) {
+		origin = "*";
+	}
 	RCore *core = (RCore*)user;
-	char *s = R_STR_ISNOTEMPTY (msg)? r_str_newf ("%s %s", origin? origin: "*", msg): strdup (origin);
+	char *s = R_STR_ISNOTEMPTY (msg)
+		? r_str_newf ("%s %s", origin, msg)
+		: strdup (origin);
 	r_core_log_add (core, s);
 	free (s);
 	return false;
 }
 
+#if R2__UNIX__
+static R_TH_LOCAL RCore *Gcore = NULL;
+
+static void cmdusr1(int p) {
+	const char *cmd = r_config_get (Gcore->config, "cmd.usr1");
+	if (R_STR_ISNOTEMPTY (cmd)) {
+		r_core_cmd0 (Gcore, cmd);
+		r_cons_flush ();
+	}
+}
+
+static void cmdusr2(int p) {
+	const char *cmd = r_config_get (Gcore->config, "cmd.usr2");
+	if (R_STR_ISNOTEMPTY (cmd)) {
+		r_core_cmd0 (Gcore, cmd);
+		r_cons_flush ();
+	}
+}
+#endif
+
+static void core_visual_init(RCoreVisual *visual) {
+	visual->printidx = 0;
+	visual->textedit_mode = true;
+	visual->obs = 0;
+	visual->ime = false;
+	visual->imes = false;
+	visual->nib = -1;
+	visual->blocksize = 0;
+	visual->autoblocksize = true;
+	visual->disMode = 0;
+	visual->hexMode = 0;
+	visual->printMode = 0;
+	visual->snowMode = false;
+	visual->snows = NULL;
+	visual->color = 1;
+	visual->zoom = 0;
+	visual->currentFormat = 0;
+	visual->current0format = 0;
+	memset (visual->numbuf, 0, sizeof (visual->numbuf));
+	visual->numbuf_i = 0;
+	visual->splitView = false;
+	visual->splitPtr = UT64_MAX;
+	visual->current3format = 0;
+	visual->current4format = 0;
+	visual->current5format = 0;
+	visual->hold = NULL;
+	visual->oldpc = 0;
+	visual->oseek = UT64_MAX;
+	memset (visual->debugstr, 0, sizeof (visual->debugstr));
+
+	visual->firstRun = true;
+	visual->fromVisual = false;
+	memset (visual->menus_Colors, 0, sizeof (visual->menus_Colors));
+}
+
 R_API bool r_core_init(RCore *core) {
+#if R2__UNIX__
+	Gcore = core;
+	r_sys_signal (SIGUSR1, cmdusr1);
+	r_sys_signal (SIGUSR2, cmdusr2);
+#endif
 	r_w32_init ();
+	core->log = r_core_log_new ();
 	core->blocksize = R_CORE_BLOCKSIZE;
 	core->block = (ut8 *)calloc (R_CORE_BLOCKSIZE + 1, 1);
 	if (!core->block) {
 		R_LOG_ERROR ("Cannot allocate %d byte(s)", R_CORE_BLOCKSIZE);
 		return false;
 	}
+	r_core_vmark_reset (core);
 	core->chan = NULL;
 	r_core_setenv (core);
 	core->lock = r_th_lock_new (true);
@@ -3018,12 +3143,13 @@ R_API bool r_core_init(RCore *core) {
 	core->ropchain = r_list_newf ((RListFree)free);
 	r_core_bind (core, &(core->print->coreb));
 	core->print->user = core;
+	core->num = r_num_new (&num_callback, &str_callback, core);
 	core->print->num = core->num;
 	core->print->offname = r_core_print_offname;
 	core->print->offsize = r_core_print_offsize;
 	core->print->cb_printf = r_cons_printf;
-#if __WINDOWS__
-	// XXX R2_580 deprecate this callback? we have the rlog apis
+#if R2__WINDOWS__
+	// XXX R2_590 deprecate this callback? we have the rlog apis
 	core->print->cb_eprintf = win_eprintf;
 #endif
 	core->print->cb_color = r_cons_rainbow_get;
@@ -3042,10 +3168,10 @@ R_API bool r_core_init(RCore *core) {
 	core->watchers->free = (RListFree)r_core_cmpwatch_free;
 	core->scriptstack = r_list_new ();
 	core->scriptstack->free = (RListFree)free;
-	core->log = r_core_log_new ();
 	core->times = R_NEW0 (RCoreTimes);
 	core->vmode = false;
-	core->printidx = 0;
+	core_visual_init (&core->visual);
+
 	core->lastcmd = NULL;
 
 	if (core->print->charset) {
@@ -3059,7 +3185,6 @@ R_API bool r_core_init(RCore *core) {
 	core->cmdqueue = r_list_newf (free);
 	core->cmdrepeat = true;
 	core->yank_buf = r_buf_new ();
-	core->num = r_num_new (&num_callback, &str_callback, core);
 	core->crypto = r_crypto_new ();
 	core->egg = r_egg_new ();
 	r_egg_setup (core->egg, R_SYS_ARCH, R_SYS_BITS, 0, R_SYS_OS);
@@ -3089,28 +3214,46 @@ R_API bool r_core_init(RCore *core) {
 	core->print->cons = core->cons;
 	r_cons_bind (&core->print->consbind);
 	core->cmdlog = NULL;
+	// XXX causes uaf
 	r_log_add_callback (cbcore, core);
 
 	// We save the old num ad user, in order to restore it after free
 	core->lang = r_lang_new ();
 	core->lang->cmd_str = (char *(*)(void *, const char *))r_core_cmd_str;
-	core->lang->cmdf = (int (*)(void *, const char *, ...))r_core_cmdf;
+	core->lang->cmdf = (RCoreCmdF)r_core_cmdf;
+	core->lang->call_at = (RCoreCallAtCallback) r_core_cmd_call_str_at;
 	r_core_bind_cons (core);
 	core->table = NULL;
 	core->lang->cb_printf = r_cons_printf;
 	r_lang_define (core->lang, "RCore", "core", core);
 	r_lang_set_user_ptr (core->lang, core);
-	core->rasm = r_asm_new ();
+	core->rasm = core->egg->rasm;
 	core->rasm->num = core->num;
-	r_asm_set_user_ptr (core->rasm, core);
 	core->anal = r_anal_new ();
+	core->egg->anal = core->anal;
+	r_anal_bind (core->egg->anal, &core->egg->rasm->analb);
+	r_asm_set_user_ptr (core->rasm, core);
+#if 1
+	// TODO: use r_ref_set
+	r_ref (core->rasm->config);
+	r_unref (core->print->config);
+	core->print->config = core->rasm->config;
+
+	r_ref (core->rasm->config);
+	r_unref (core->anal->config);
+	core->anal->config = core->rasm->config;
+
+	r_ref (core->rasm->config);
+	r_unref (core->anal->reg->config);
+	core->anal->reg->config = core->rasm->config;
+#else
 	r_ref_set (core->print->config, core->rasm->config);
 	r_ref_set (core->anal->config, core->rasm->config);
 	r_ref_set (core->anal->reg->config, core->rasm->config);
+#endif
 	// RAnal.new() doesnt initializes this field. but it should be refcounted
 	core->anal->print = core->print;
 	r_anal_set_bits (core->anal, 32); // core->rasm->config->bits);
-	r_anal_bind (core->anal, &core->rasm->analb);
 	core->gadgets = r_list_newf ((RListFree)r_core_gadget_free);
 	core->anal->ev = core->ev;
 	core->anal->log = r_core_anal_log;
@@ -3119,6 +3262,7 @@ R_API bool r_core_init(RCore *core) {
 	core->anal->cb.on_fcn_new = on_fcn_new;
 	core->anal->cb.on_fcn_delete = on_fcn_delete;
 	core->anal->cb.on_fcn_rename = on_fcn_rename;
+	r_anal_bind (core->anal, &core->rasm->analb);
 	core->print->sdb_types = core->anal->sdb_types;
 	core->rasm->syscall = r_syscall_ref (core->anal->syscall); // BIND syscall anal/asm
 	r_anal_set_user_ptr (core->anal, core);
@@ -3130,7 +3274,7 @@ R_API bool r_core_init(RCore *core) {
 	r_parse_set_user_ptr (core->parser, core);
 	core->bin = r_bin_new ();
 	r_cons_bind (&core->bin->consb);
-	// XXX we shuold use RConsBind instead of this hardcoded pointer
+	// XXX we should use RConsBind instead of this hardcoded pointer
 	core->bin->cb_printf = (PrintfCallback) r_cons_printf;
 	r_bin_set_user_ptr (core->bin, core);
 	core->io = r_io_new ();
@@ -3151,10 +3295,10 @@ R_API bool r_core_init(RCore *core) {
 		core->asmqjmps = R_NEWS (ut64, core->asmqjmps_size);
 	}
 
-	r_bin_bind (core->bin, &(core->rasm->binb));
 	r_bin_bind (core->bin, &(core->anal->binb));
-	r_bin_bind (core->bin, &(core->anal->binb));
-
+	r_bin_bind (core->bin, &(core->anal->arch->binb));
+	r_num_free (core->anal->arch->num);
+	core->anal->arch->num = core->num;
 	r_io_bind (core->io, &(core->search->iob));
 	r_io_bind (core->io, &(core->print->iob));
 	r_io_bind (core->io, &(core->anal->iob));
@@ -3184,7 +3328,7 @@ R_API bool r_core_init(RCore *core) {
 	r_core_bind (core, &core->dbg->bp->coreb);
 	r_core_bind (core, &core->io->coreb);
 	core->dbg->anal = core->anal; // XXX: dupped instance.. can cause lost pointerz
-	//r_debug_use (core->dbg, "native");
+	// r_debug_use (core->dbg, "native");
 // XXX pushing uninitialized regstate results in trashed reg values
 //	r_reg_arena_push (core->dbg->reg); // create a 2 level register state stack
 //	core->dbg->anal->reg = core->anal->reg; // XXX: dupped instance.. can cause lost pointerz
@@ -3195,7 +3339,6 @@ R_API bool r_core_init(RCore *core) {
 	r_core_config_init (core);
 	r_core_loadlibs_init (core);
 	//r_core_loadlibs (core);
-
 	// TODO: get arch from r_bin or from native arch
 #if 0
 	// Seems unnecessary
@@ -3258,6 +3401,10 @@ R_API void r_core_fini(RCore *c) {
 	if (c->chan) {
 		r_th_channel_free (c->chan);
 	}
+#if R2__UNIX__
+	Gcore = NULL;
+#endif
+	r_log_add_callback (cbcore, NULL);
 	r_crypto_free (c->crypto);
 	r_th_lock_free (c->lock);
 	r_core_task_break_all (&c->tasks);
@@ -3291,13 +3438,18 @@ R_API void r_core_fini(RCore *c) {
 	r_core_task_scheduler_fini (&c->tasks);
 	c->rcmd = r_cmd_free (c->rcmd);
 	r_list_free (c->cmd_descriptors);
-	r_unref (c->print->config);
+	/*
 	r_unref (c->anal->reg->config);
 	r_unref (c->anal->config);
+	*/
+	if (c->anal->esil) {
+		c->anal->esil->anal = NULL;
+	}
 	r_anal_free (c->anal);
 	r_asm_free (c->rasm);
 	c->rasm = NULL;
-	c->print = r_print_free (c->print);
+	r_print_free (c->print);
+	c->print = NULL;
 	c->bin = (r_bin_free (c->bin), NULL);
 	c->dbg = (r_debug_free (c->dbg), NULL);
 	c->io = (r_io_free (c->io), NULL);
@@ -3314,6 +3466,7 @@ R_API void r_core_fini(RCore *c) {
 	r_search_free (c->search);
 	r_flag_free (c->flags);
 	r_fs_free (c->fs);
+	c->egg->rasm = NULL;
 	r_egg_free (c->egg);
 	r_lib_free (c->lib);
 	r_buf_free (c->yank_buf);
@@ -3334,7 +3487,7 @@ R_API void r_core_free(RCore *c) {
 }
 
 R_API bool r_core_prompt_loop(RCore *r) {
-	int ret;
+	int ret = 0;
 	do {
 		int err = r_core_prompt (r, false);
 		if (err < 1) {
@@ -3343,7 +3496,8 @@ R_API bool r_core_prompt_loop(RCore *r) {
 			return false;
 		}
 		/* -1 means invalid command, -2 means quit prompt loop */
-		if ((ret = r_core_prompt_exec (r)) == R_CMD_RC_QUIT) {
+		ret = r_core_prompt_exec (r);
+		if (ret == R_CMD_RC_QUIT) {
 			break;
 		}
 	} while (ret != R_CORE_CMD_EXIT);
@@ -3380,15 +3534,13 @@ static void prompt_sec(RCore *r, char *s, size_t maxlen) {
 }
 
 static void chop_prompt(const char *filename, char *tmp, size_t max_tmp_size) {
-	size_t tmp_len, file_len;
 	unsigned int OTHRSCH = 3;
 	const char DOTS[] = "...";
-	int w, p_len;
 
-	w = r_cons_get_size (NULL);
-	file_len = strlen (filename);
-	tmp_len = strlen (tmp);
-	p_len = R_MAX (0, w - 6);
+	int w = r_cons_get_size (NULL);
+	size_t file_len = strlen (filename);
+	size_t tmp_len = strlen (tmp);
+	int p_len = R_MAX (0, w - 6);
 	if (file_len + tmp_len + OTHRSCH >= p_len) {
 		size_t dots_size = sizeof (DOTS);
 		size_t chop_point = (size_t)(p_len - OTHRSCH - file_len - dots_size);
@@ -3406,14 +3558,14 @@ static void set_prompt(RCore *r) {
 	const char *END = "";
 	const char *remote = "";
 
-	if (cmdprompt && *cmdprompt) {
+	if (R_STR_ISNOTEMPTY (cmdprompt)) {
 		r_core_cmd (r, cmdprompt, 0);
 	}
 
-	if (r_config_get_i (r->config, "scr.prompt.file")) {
+	if (r_config_get_b (r->config, "scr.prompt.file")) {
 		free (filename);
-		filename = r_str_newf ("\"%s\"",
-			r->io->desc ? r_file_basename (r->io->desc->name) : "");
+		const char *fn = r->io->desc ? r_file_basename (r->io->desc->name) : "";
+		filename = r_str_newf ("\"%s\"", fn);
 	}
 	if (r->cmdremote) {
 		char *s = r_core_cmd_str (r, "s");
@@ -3439,13 +3591,12 @@ static void set_prompt(RCore *r) {
 		int promptset = false;
 
 		sec[0] = '\0';
-		if (r_config_get_i (r->config, "scr.prompt.flag")) {
+		if (r_config_get_b (r->config, "scr.prompt.flag")) {
 			promptset = prompt_flag (r, p, sizeof (p));
 		}
-		if (r_config_get_i (r->config, "scr.prompt.sect")) {
+		if (r_config_get_b (r->config, "scr.prompt.sect")) {
 			prompt_sec (r, sec, sizeof (sec));
 		}
-
 		if (!promptset) {
 			if (r->print->wide_offsets && r->dbg->bits & R_SYS_BITS_64) {
 				snprintf (p, sizeof (p), "0x%016" PFMT64x, r->offset);
@@ -3457,8 +3608,13 @@ static void set_prompt(RCore *r) {
 	}
 
 	chop_prompt (filename, tmp, 128);
-	char *prompt = r_str_newf ("%s%s[%s%s]> %s", filename, BEGIN, remote,
-		tmp, END);
+	char *prompt = NULL;
+	if (r_config_get_b (r->config, "scr.prompt.code")) {
+		st64 code = r->num->value;
+		prompt = r_str_newf ("%s%s[%"PFMT64d":%s%s]> %s", filename, BEGIN, code, remote, tmp, END);
+	} else {
+		prompt = r_str_newf ("%s%s[%s%s]> %s", filename, BEGIN, remote, tmp, END);
+	}
 	r_line_set_prompt (r_str_get (prompt));
 
 	R_FREE (filename);
@@ -3562,12 +3718,12 @@ R_API int r_core_seek_size(RCore *core, ut64 addr, int bsize) {
 	if (r_sandbox_enable (0)) {
 		// TODO : restrict to filesize?
 		if (bsize > 1024 * 32) {
-			r_cons_eprintf ("Sandbox mode restricts blocksize bigger than 32k\n");
+			R_LOG_ERROR ("Sandbox mode restricts blocksize bigger than 32k");
 			return false;
 		}
 	}
 	if (bsize > core->blocksize_max) {
-		r_cons_eprintf ("Block size %d is too big\n", bsize);
+		R_LOG_ERROR ("Block size %d is too big", bsize);
 		return false;
 	}
 	R_CRITICAL_ENTER (core);
@@ -3575,13 +3731,13 @@ R_API int r_core_seek_size(RCore *core, ut64 addr, int bsize) {
 	if (bsize < 1) {
 		bsize = 1;
 	} else if (core->blocksize_max && bsize>core->blocksize_max) {
-		r_cons_eprintf ("bsize is bigger than `bm`. dimmed to 0x%x > 0x%x\n",
+		R_LOG_ERROR ("bsize is bigger than `bm`. dimmed to 0x%x > 0x%x",
 			bsize, core->blocksize_max);
 		bsize = core->blocksize_max;
 	}
 	bump = realloc (core->block, bsize + 1);
 	if (!bump) {
-		r_cons_eprintf ("Oops. cannot allocate that much (%u)\n", bsize);
+		R_LOG_ERROR ("Oops. cannot allocate that much (%u)", bsize);
 		ret = false;
 	} else {
 		ret = true;
@@ -3628,21 +3784,25 @@ R_API int r_core_seek_align(RCore *core, ut64 align, int times) {
 }
 
 R_API char *r_core_op_str(RCore *core, ut64 addr) {
-	RAsmOp op = {0};
-	ut8 buf[64];
+	RAnalOp op;
+	r_anal_op_init (&op);
 	r_asm_set_pc (core->rasm, addr);
+	ut8 buf[64];
+	// TODO: use archinfo to avoid readingn 64bytes always
 	r_io_read_at (core->io, addr, buf, sizeof (buf));
 	int ret = r_asm_disassemble (core->rasm, &op, buf, sizeof (buf));
-	char *str = (ret > 0)? strdup (r_strbuf_get (&op.buf_asm)): NULL;
-	r_asm_op_fini (&op);
+	char *str = (ret > 0)? strdup (op.mnemonic): NULL;
+	r_anal_op_fini (&op);
 	return str;
 }
 
 R_API RAnalOp *r_core_op_anal(RCore *core, ut64 addr, RAnalOpMask mask) {
 	ut8 buf[64];
 	RAnalOp *op = R_NEW (RAnalOp);
-	r_io_read_at (core->io, addr, buf, sizeof (buf));
-	r_anal_op (core->anal, op, addr, buf, sizeof (buf), mask);
+	if (op) {
+		r_io_read_at (core->io, addr, buf, sizeof (buf));
+		r_anal_op (core->anal, op, addr, buf, sizeof (buf), mask);
+	}
 	return op;
 }
 
@@ -3664,12 +3824,12 @@ R_API bool r_core_serve(RCore *core, RIODesc *file) {
 
 	RIORap *rior = (RIORap *)file->data;
 	if (!rior || !rior->fd) {
-		r_cons_eprintf ("rap: cannot listen.\n");
+		R_LOG_ERROR ("rap: cannot listen");
 		return false;
 	}
 	RSocket *fd = rior->fd;
-	r_cons_eprintf ("RAP Server started (rap.loop=%s)\n",
-			r_config_get (core->config, "rap.loop"));
+	const char *arg = r_config_get (core->config, "rap.loop");
+	R_LOG_INFO ("RAP Server started (rap.loop=%s)", arg);
 	r_cons_break_push (rap_break, rior);
 reaccept:
 	while (!r_cons_is_breaked ()) {
@@ -3681,16 +3841,16 @@ reaccept:
 			goto out_of_function;
 		}
 		if (!c) {
-			r_cons_eprintf ("rap: cannot accept\n");
+			R_LOG_ERROR ("rap: cannot accept");
 			r_socket_free (c);
 			goto out_of_function;
 		}
-		r_cons_eprintf ("rap: client connected\n");
+		R_LOG_INFO ("rap: client connected");
 		for (;!r_cons_is_breaked ();) {
 			if (!r_socket_read_block (c, &cmd, 1)) {
-				r_cons_eprintf ("rap: connection closed\n");
+				R_LOG_INFO ("rap: connection closed");
 				if (r_config_get_i (core->config, "rap.loop")) {
-					r_cons_eprintf ("rap: waiting for new connection\n");
+					R_LOG_INFO ("rap: waiting for new connection");
 					r_socket_free (c);
 					goto reaccept;
 				}
@@ -3699,7 +3859,7 @@ reaccept:
 			switch (cmd) {
 			case RAP_PACKET_OPEN:
 				r_socket_read_block (c, &flg, 1); // flags
-				r_cons_eprintf ("open (%d): ", cmd);
+				R_LOG_DEBUG ("open (%d)", cmd);
 				r_socket_read_block (c, &cmd, 1); // len
 				pipefd = -1;
 				if (UT8_ADD_OVFCHK (cmd, 1)) {
@@ -3707,7 +3867,7 @@ reaccept:
 				}
 				ptr = malloc ((size_t)cmd + 1);
 				if (!ptr) {
-					r_cons_eprintf ("Cannot malloc in rmt-open len = %d\n", cmd);
+					R_LOG_ERROR ("Cannot malloc in rmt-open len = %d", cmd);
 				} else {
 					ut64 baddr = r_config_get_i (core->config, "bin.laddr");
 					r_socket_read_block (c, ptr, cmd);
@@ -3725,14 +3885,13 @@ reaccept:
 						} else {
 							pipefd = -1;
 						}
-						r_cons_eprintf ("(flags: %d) len: %d filename: '%s'\n",
-							flg, cmd, ptr); //config.file);
+						R_LOG_ERROR ("(flags: %d) len: %d filename: '%s'", flg, cmd, ptr);
 					} else {
 						pipefd = -1;
-						r_cons_eprintf ("Cannot open file (%s)\n", ptr);
+						R_LOG_ERROR ("Cannot open file (%s)", ptr);
 						r_socket_close (c);
 						if (r_config_get_i (core->config, "rap.loop")) {
-							r_cons_eprintf ("rap: waiting for new connection\n");
+							R_LOG_INFO ("rap: waiting for new connection");
 							r_socket_free (c);
 							goto reaccept;
 						}
@@ -3767,7 +3926,7 @@ reaccept:
 					r_socket_flush (c);
 					R_FREE (ptr);
 				} else {
-					r_cons_eprintf ("Cannot read %d byte(s)\n", i);
+					R_LOG_ERROR ("Cannot read %d byte(s)", i);
 					r_socket_free (c);
 					// TODO: reply error here
 					goto out_of_function;
@@ -3793,10 +3952,10 @@ reaccept:
 						r_config_set_b (core->config, "scr.interactive", scr_interactive);
 						free (cmd);
 					} else {
-						r_cons_eprintf ("rap: cannot malloc\n");
+						R_LOG_ERROR ("rap: cannot malloc");
 					}
 				} else {
-					r_cons_eprintf ("rap: invalid length '%d'\n", i);
+					R_LOG_INFO ("rap: invalid length '%d'", i);
 				}
 				/* write */
 				if (cmd_output) {
@@ -3822,11 +3981,11 @@ reaccept:
 					r_socket_read_block (c, b, 5);
 					if (b[0] == (RAP_PACKET_CMD | RAP_PACKET_REPLY)) {
 						ut32 n = r_read_be32 (b + 1);
-						r_cons_eprintf ("REPLY %d\n", n);
+						R_LOG_DEBUG ("REPLY %d", n);
 						if (n > 0) {
 							ut8 *res = calloc (1, n);
 							r_socket_read_block (c, res, n);
-							r_cons_eprintf ("RESPONSE(%s)\n", (const char *)res);
+							R_LOG_DEBUG ("RESPONSE(%s)", (const char *)res);
 							free (res);
 						}
 					}
@@ -3918,19 +4077,19 @@ reaccept:
 						r_socket_close (c);
 					}
 				} else {
-					r_cons_eprintf ("[rap] unknown command 0x%02x\n", cmd);
+					R_LOG_ERROR ("[rap] unknown command 0x%02x", cmd);
 					r_socket_close (c);
 					R_FREE (ptr);
 				}
 				if (r_config_get_i (core->config, "rap.loop")) {
-					r_cons_eprintf ("rap: waiting for new connection\n");
+					R_LOG_INFO ("rap: waiting for new connection");
 					r_socket_free (c);
 					goto reaccept;
 				}
 				goto out_of_function;
 			}
 		}
-		r_cons_eprintf ("client: disconnected\n");
+		R_LOG_INFO ("client: disconnected");
 		r_socket_free (c);
 	}
 out_of_function:
@@ -3938,11 +4097,12 @@ out_of_function:
 	return false;
 }
 
+#if 0
 R_API int r_core_search_cb(RCore *core, ut64 from, ut64 to, RCoreSearchCallback cb) {
 	int ret, len = core->blocksize;
 	ut8 *buf = malloc (len);
 	if (!buf) {
-		r_cons_eprintf ("Cannot allocate blocksize\n");
+		R_LOG_ERROR ("Cannot allocate blocksize");
 		return false;
 	}
 	while (from < to) {
@@ -3951,7 +4111,7 @@ R_API int r_core_search_cb(RCore *core, ut64 from, ut64 to, RCoreSearchCallback 
 			len = (int)delta;
 		}
 		if (!r_io_read_at (core->io, from, buf, len)) {
-			r_cons_eprintf ("Cannot read at 0x%"PFMT64x"\n", from);
+			R_LOG_ERROR ("RCoreSearchCb: Cannot read at 0x%"PFMT64x, from);
 			break;
 		}
 		for (ret = 0; ret < len;) {
@@ -3967,6 +4127,7 @@ R_API int r_core_search_cb(RCore *core, ut64 from, ut64 to, RCoreSearchCallback 
 	free (buf);
 	return true;
 }
+#endif
 
 R_API char *r_core_editor(const RCore *core, const char *file, const char *str) {
 	const bool interactive = r_cons_is_interactive ();
@@ -3998,7 +4159,7 @@ R_API char *r_core_editor(const RCore *core, const char *file, const char *str) 
 		return NULL;
 	}
 	if (readonly) {
-		r_cons_eprintf ("Opening in read-only\n");
+		R_LOG_INFO ("Opening in read-only");
 	} else {
 		if (str) {
 			const size_t str_len = strlen (str);
@@ -4068,9 +4229,10 @@ R_API RBuffer *r_core_syscall(RCore *core, const char *name, const char *args) {
 	RBuffer *b = NULL;
 	char code[1024];
 
-	//arch check
-	if (strcmp (core->anal->cur->arch, "x86")) {
-		r_cons_eprintf ("architecture not yet supported!\n");
+	// arch check
+	const char *arch = R_UNWRAP5 (core, anal, arch, session, name);
+	if (arch && strcmp (arch, "x86")) {
+		R_LOG_ERROR ("architecture not yet supported!");
 		return 0;
 	}
 
@@ -4085,18 +4247,18 @@ R_API RBuffer *r_core_syscall(RCore *core, const char *name, const char *args) {
 	switch (core->rasm->config->bits) {
 	case 32:
 		if (strcmp (name, "setup") && !num ) {
-			r_cons_eprintf ("syscall not found!\n");
+			R_LOG_ERROR ("syscall not found!");
 			return 0;
 		}
 		break;
 	case 64:
 		if (strcmp (name, "read") && !num ) {
-			r_cons_eprintf ("syscall not found!\n");
+			R_LOG_ERROR ("syscall not found!");
 			return 0;
 		}
 		break;
 	default:
-		r_cons_eprintf ("syscall not found!\n");
+		R_LOG_ERROR ("syscall not found!");
 		return 0;
 	}
 
@@ -4110,10 +4272,10 @@ R_API RBuffer *r_core_syscall(RCore *core, const char *name, const char *args) {
 	r_egg_load (core->egg, code, 0);
 
 	if (!r_egg_compile (core->egg)) {
-		r_cons_eprintf ("Cannot compile.\n");
+		R_LOG_ERROR ("Cannot compile");
 	}
 	if (!r_egg_assemble (core->egg)) {
-		r_cons_eprintf ("r_egg_assemble: invalid assembly\n");
+		R_LOG_ERROR ("r_egg_assemble: invalid assembly");
 	}
 	if ((b = r_egg_get_bin (core->egg))) {
 #if 0
@@ -4129,13 +4291,15 @@ R_API RBuffer *r_core_syscall(RCore *core, const char *name, const char *args) {
 }
 
 R_API RCoreAutocomplete *r_core_autocomplete_add(RCoreAutocomplete *parent, const char* cmd, int type, bool lock) {
-	if (!parent || !cmd || type < 0 || type >= R_CORE_AUTOCMPLT_END) {
+	r_return_val_if_fail (parent && cmd, NULL);
+	if (type < 0 || type >= R_CORE_AUTOCMPLT_END) {
 		return NULL;
 	}
 	RCoreAutocomplete *autocmpl = R_NEW0 (RCoreAutocomplete);
 	if (!autocmpl) {
 		return NULL;
 	}
+	// TODO: use rlist or so
 	RCoreAutocomplete **updated = realloc (parent->subcmds, (parent->n_subcmds + 1) * sizeof (RCoreAutocomplete*));
 	if (!updated) {
 		free (autocmpl);
@@ -4152,29 +4316,27 @@ R_API RCoreAutocomplete *r_core_autocomplete_add(RCoreAutocomplete *parent, cons
 }
 
 R_API void r_core_autocomplete_free(RCoreAutocomplete *obj) {
-	if (!obj) {
-		return;
+	if (obj) {
+		int i;
+		for (i = 0; i < obj->n_subcmds; i++) {
+			r_core_autocomplete_free (obj->subcmds[i]);
+			obj->subcmds[i] = NULL;
+		}
+		free (obj->subcmds);
+		free (obj->cmd);
+		free (obj);
 	}
-	int i;
-	for (i = 0; i < obj->n_subcmds; i++) {
-		r_core_autocomplete_free (obj->subcmds[i]);
-		obj->subcmds[i] = NULL;
-	}
-	free (obj->subcmds);
-	free ((char*) obj->cmd);
-	free (obj);
 }
 
 R_API RCoreAutocomplete *r_core_autocomplete_find(RCoreAutocomplete *parent, const char* cmd, bool exact) {
-	if (!parent || !cmd) {
-		return false;
-	}
-	int len = strlen (cmd);
+	r_return_val_if_fail (parent && cmd, NULL);
+	size_t len = strlen (cmd);
 	int i;
 	for (i = 0; i < parent->n_subcmds; i++) {
-		if (exact && len == parent->subcmds[i]->length && !strncmp (cmd, parent->subcmds[i]->cmd, len)) {
-			return parent->subcmds[i];
-		} else if (!exact && !strncmp (cmd, parent->subcmds[i]->cmd, len)) {
+		if (exact && len != parent->subcmds[i]->length) {
+			continue;
+		}
+		if (!strncmp (cmd, parent->subcmds[i]->cmd, len)) {
 			return parent->subcmds[i];
 		}
 	}
@@ -4182,9 +4344,7 @@ R_API RCoreAutocomplete *r_core_autocomplete_find(RCoreAutocomplete *parent, con
 }
 
 R_API bool r_core_autocomplete_remove(RCoreAutocomplete *parent, const char* cmd) {
-	if (!parent || !cmd) {
-		return false;
-	}
+	r_return_val_if_fail (parent && cmd, false);
 	int i, j;
 	for (i = 0; i < parent->n_subcmds; i++) {
 		RCoreAutocomplete *ac = parent->subcmds[i];
@@ -4200,7 +4360,7 @@ R_API bool r_core_autocomplete_remove(RCoreAutocomplete *parent, const char* cmd
 			r_core_autocomplete_free (ac);
 			RCoreAutocomplete **updated = realloc (parent->subcmds, (parent->n_subcmds - 1) * sizeof (RCoreAutocomplete*));
 			if (!updated && (parent->n_subcmds - 1) > 0) {
-				r_cons_eprintf ("Something really bad has happen.. this should never ever happen..\n");
+				R_LOG_INFO ("Something really bad has happen.. this should never ever happen");
 				return false;
 			}
 			parent->subcmds = updated;
@@ -4221,23 +4381,23 @@ R_API RTable *r_core_table(RCore *core, const char *name) {
 
 /* Config helper function for PJ json encodings */
 R_API PJ *r_core_pj_new(RCore *core) {
-	const char *config_string_encoding = r_config_get (core->config, "cfg.json.str");
-	const char *config_num_encoding = r_config_get (core->config, "cfg.json.num");
+	const char *se = r_config_get (core->config, "cfg.json.str");
+	const char *ne = r_config_get (core->config, "cfg.json.num");
 	PJEncodingNum number_encoding = PJ_ENCODING_NUM_DEFAULT;
 	PJEncodingStr string_encoding = PJ_ENCODING_STR_DEFAULT;
 
-	if (!strcmp ("string", config_num_encoding)) {
+	if (r_str_startswith (ne, "str")) {
 		number_encoding = PJ_ENCODING_NUM_STR;
-	} else if (!strcmp ("hex", config_num_encoding)) {
+	} else if (strstr (ne, "hex")) {
 		number_encoding = PJ_ENCODING_NUM_HEX;
 	}
-	if (!strcmp ("base64", config_string_encoding)) {
+	if (!strcmp (se, "base64")) {
 		string_encoding = PJ_ENCODING_STR_BASE64;
-	} else if (!strcmp ("hex", config_string_encoding)) {
+	} else if (!strcmp (se, "hex")) {
 		string_encoding = PJ_ENCODING_STR_HEX;
-	} else if (!strcmp ("array", config_string_encoding)) {
+	} else if (!strcmp (se, "array")) {
 		string_encoding = PJ_ENCODING_STR_ARRAY;
-	} else if (!strcmp ("strip", config_string_encoding)) {
+	} else if (!strcmp (se, "strip")) {
 		string_encoding = PJ_ENCODING_STR_STRIP;
 	}
 	return pj_new_with_encoding (string_encoding, number_encoding);
@@ -4245,7 +4405,7 @@ R_API PJ *r_core_pj_new(RCore *core) {
 
 // reentrant version of RCore.cmd()
 R_API char *r_core_cmd_str_r(RCore *core, const char *cmd) {
-	if (!strncmp (cmd, "::", 2)) {
+	if (r_str_startswith (cmd, "::")) {
 		return NULL;
 	}
 	if (!core->chan) {
@@ -4254,7 +4414,7 @@ R_API char *r_core_cmd_str_r(RCore *core, const char *cmd) {
 	RThreadChannelMessage *message = r_th_channel_message_new (core->chan, (const ut8*)cmd, strlen (cmd) + 1);
 	RThreadChannelPromise *promise = r_th_channel_query (core->chan, message);
 	RThreadChannelMessage *response = r_th_channel_promise_wait (promise);
-	char *res = strdup ((const char *)response->msg);
+	char *res = response->msg? strdup ((const char *)response->msg): NULL;
 	// r_cons_printf ("%s", response->msg);
 	r_th_channel_message_free (message);
 	r_th_channel_promise_free (promise);

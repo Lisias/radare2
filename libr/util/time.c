@@ -23,7 +23,7 @@ R_API ut64 r_time_now(void) {
 }
 
 R_API ut64 r_time_now_mono(void) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	LARGE_INTEGER f;
 	if (!QueryPerformanceFrequency (&f)) {
 		return 0;
@@ -37,7 +37,7 @@ R_API ut64 r_time_now_mono(void) {
 	return v.QuadPart;
 #elif __APPLE__ && !defined(MAC_OS_X_VERSION_10_12)
 	ut64 ticks = mach_absolute_time ();
-	static R_TH_LOCAL mach_timebase_info_data_t tb;
+	mach_timebase_info_data_t tb;
 	mach_timebase_info (&tb);
 	return ((ticks * tb.numer) / tb.denom) / R_NSEC_PER_USEC;
 #elif HAS_CLOCK_MONOTONIC
@@ -50,9 +50,8 @@ R_API ut64 r_time_now_mono(void) {
 #endif
 }
 
-// R_API char *r_time_stamp_to_str(ut32 timeStamp) {
 R_API R_MUSTUSE char *r_time_stamp_to_str(time_t timeStamp) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	time_t rawtime;
 	struct tm *tminfo;
 	rawtime = (time_t)timeStamp;
@@ -167,20 +166,6 @@ R_API int r_print_date_unix(RPrint *p, const ut8 *buf, int len) {
 	return ret;
 }
 
-R_DEPRECATE R_API int r_print_date_get_now(RPrint *p, char *str) {
-	eprintf ("This function is wrong in so many ways, dont use it, will be removed in r2-5.8\n");
-	int ret = 0;
-	time_t l;
-
-	*str = 0;
-	l = time (0);
-
-	str = r_time_stamp_to_str (l);
-	p->cb_printf ("%s\n", str);
-	ret = sizeof (time_t);
-	return ret;
-}
-
 R_API int r_print_date_w32(RPrint *p, const ut8 *buf, int len) {
 	const ut64 L = 0x2b6109100LL;
 	int ret = 0;
@@ -200,13 +185,13 @@ R_API int r_print_date_w32(RPrint *p, const ut8 *buf, int len) {
 	return ret;
 }
 
-R_API const char *r_time_to_string(ut64 ts) {
+R_API char *r_time_tostring(ut64 ts) {
 	time_t l = ts >> 20;
 	return r_time_stamp_to_str (l);
 }
 
 R_API char *r_asctime_r(const struct tm *tm, char *buf) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	errno_t err = asctime_s (buf, ASCTIME_BUF_MAXLEN, tm);
 	return err? NULL: buf;
 #else
@@ -215,10 +200,41 @@ R_API char *r_asctime_r(const struct tm *tm, char *buf) {
 }
 
 R_API char *r_ctime_r(const time_t *timer, char *buf) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	errno_t err = ctime_s (buf, ASCTIME_BUF_MAXLEN, timer);
 	return err? NULL: buf;
 #else
 	return ctime_r (timer, buf);
 #endif
 }
+
+static int get_time_correction(void) {
+#if R2__UNIX__
+	struct my_timezone {
+		int tz_minuteswest;     /* minutes west of Greenwich */
+		int tz_dsttime;         /* type of DST correction */
+	} tz;
+	struct timeval tv;
+	gettimeofday (&tv, (void*) &tz);
+	return (int) (tz.tz_minuteswest * 60); // in seconds
+#else
+#pragma message("warning BEAT time may not correct for this platform")
+	return (60*60); // hardcoded gmt+1
+#endif
+}
+
+R_API int r_time_beats(ut64 ts, int *sub) {
+	if (sub) {
+		// R_WARN_LOG ("sub-beats not implemented yet");
+	}
+	ut64 seconds = ts / (1000 * 1000);
+	int time_correction = get_time_correction ();
+	seconds -= time_correction;
+	seconds %= 86400;
+	ut64 beats = (ut64)((seconds / 86.4) * 100) / 100;
+	if (beats >= 1000) {
+		return (int) R_ABS (beats - 1000);
+	}
+	return beats;
+}
+

@@ -1,8 +1,8 @@
-/* radare - Copyright 2014-2022 pancake, defragger */
+/* radare - Copyright 2014-2023 pancake, defragger */
 
-#include <r_types.h>
+#define R_LOG_ORIGIN "a2f"
+
 #include <r_core.h>
-#include <r_io.h>
 
 #define MAXFCNSIZE 4096
 
@@ -107,12 +107,12 @@ void addTarget(RCore *core, RStack *stack, Sdb *db, ut64 addr) {
 	}
 	ut64* value = (ut64*) calloc (1, sizeof (ut64));
 	if (!value) {
-		R_LOG_ERROR ("Failed to allocate memory for address stack");
+		R_LOG_DEBUG ("Failed to allocate memory for address stack");
 		return;
 	}
 	*value = addr;
 	if (!r_stack_push (stack, (void*)value)) {
-		R_LOG_ERROR ("Failed to push address on stack");
+		R_LOG_DEBUG ("Failed to push address on stack");
 		free (value);
 		return;
 	}
@@ -150,12 +150,12 @@ static ut64 analyzeStackBased(RCore *core, Sdb *db, ut64 addr, RList *delayed_co
 		while (!block_end && cur < maxfcnsize) {
 			op = r_core_anal_op (core, addr + cur, R_ARCH_OP_MASK_BASIC | R_ARCH_OP_MASK_DISASM);
 			if (!op || !op->mnemonic) {
-				R_LOG_ERROR ("a2f: Cannot analyze opcode at 0x%"PFMT64x, addr+cur);
+				R_LOG_DEBUG ("a2f: Cannot analyze opcode at 0x%"PFMT64x, addr+cur);
 				oaddr = UT64_MAX;
 				break;
 			}
 			if (op->mnemonic[0] == '?') {
-				R_LOG_ERROR ("a2f: Cannot analyze opcode at 0x%"PFMT64x, addr+cur);
+				R_LOG_DEBUG ("a2f: Cannot analyze opcode at 0x%"PFMT64x, addr+cur);
 				oaddr = UT64_MAX;
 				break;
 			}
@@ -239,7 +239,7 @@ static ut64 analyzeStackBased(RCore *core, Sdb *db, ut64 addr, RList *delayed_co
 				break;
 			case R_ANAL_OP_TYPE_UNK:
 			case R_ANAL_OP_TYPE_ILL:
-				eprintf ("a2f: Invalid instruction\n");
+				R_LOG_DEBUG ("a2f: Invalid instruction");
 				block_end = true;
 				break;
 			default:
@@ -302,7 +302,6 @@ static bool analyzeFunction(RCore *core, ut64 addr) {
 
 	RList *delayed_commands = r_list_newf (free);
 	if (!delayed_commands) {
-		R_LOG_ERROR ("Failed to initialize the delayed command list");
 		sdb_free (db);
 		return false;
 	}
@@ -396,16 +395,25 @@ static bool analyzeFunction(RCore *core, ut64 addr) {
 
 static int r_cmd_anal_call(void *user, const char *input) {
 	RCore *core = (RCore *) user;
+	static RCoreHelpMessage help_msg_a2f = {
+		"Usage:", "a2f", "Experimental function analysis",
+		"a2f", "", "like af, but with an experimental engine. see anal.a2f",
+		NULL
+	};
 	if (!strncmp (input, "a2", 2)) {
 		switch (input[2]) {
 		case 'f':
+			if (input[3] == '?') {
+				r_core_cmd_help (core, help_msg_a2f);
+				return true;
+			}
+
 			if (!analyzeFunction (core, core->offset)) {
-				eprintf ("a2f: Failed to analyze function at 0x%08"PFMT64x".\n", core->offset);
+				R_LOG_DEBUG ("a2f: Failed to analyze function at 0x%08"PFMT64x, core->offset);
 			}
 			break;
 		default:
-			eprintf ("Usage: a2f @ address_of_function          # See anal.a2f\n");
-			eprintf ("a2f is an experimental analysis engine that replaces af.\n");
+			r_core_cmd_help (core, help_msg_a2f);
 			break;
 		}
 		return true;
@@ -415,9 +423,12 @@ static int r_cmd_anal_call(void *user, const char *input) {
 
 // PLUGIN Definition Info
 RCorePlugin r_core_plugin_a2f = {
-	.name = "a2f",
-	.desc = "The reworked analysis from scratch thing",
-	.license = "LGPL3",
+	.meta = {
+		.name = "a2f",
+		.desc = "The reworked analysis from scratch thing",
+		.author = "pancake",
+		.license = "LGPL3",
+	},
 	.call = r_cmd_anal_call,
 };
 

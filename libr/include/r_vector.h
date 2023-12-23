@@ -53,6 +53,12 @@ typedef struct r_vector_t {
 // RPVector directly wraps RVector for type safety
 typedef struct r_pvector_t { RVector v; } RPVector;
 
+#define INITIAL_VECTOR_LEN 4
+
+#define NEXT_VECTOR_CAPACITY (vec->capacity < INITIAL_VECTOR_LEN \
+	? INITIAL_VECTOR_LEN \
+	: vec->capacity <= 12 ? vec->capacity * 2 \
+	: vec->capacity + (vec->capacity >> 1))
 
 // RVector
 
@@ -60,14 +66,15 @@ R_API void r_vector_init(RVector *vec, size_t elem_size, RVectorFree free, void 
 
 R_API RVector *r_vector_new(size_t elem_size, RVectorFree free, void *free_user);
 
-// clears the vector and calls vec->free on every element if set.
+// calls vec->free on every element if set and clears the vector.
 R_API void r_vector_fini(RVector *vec);
 
-// frees the vector and calls vec->free on every element if set.
+// calls vec->free on every element if set and frees the vector.
 R_API void r_vector_free(RVector *vec);
 
 // the returned vector will have the same capacity as vec.
 R_API RVector *r_vector_clone(RVector *vec);
+R_API bool r_vector_copy(RVector *d, RVector *s);
 
 static inline bool r_vector_empty(const RVector *vec) {
 	r_return_val_if_fail (vec, false);
@@ -77,19 +84,22 @@ static inline bool r_vector_empty(const RVector *vec) {
 R_API void r_vector_clear(RVector *vec);
 
 // returns the length of the vector
-static inline size_t r_vector_len(const RVector *vec) {
+static inline size_t r_vector_length(const RVector *vec) {
 	r_return_val_if_fail (vec, 0);
 	return vec->len;
 }
 
 // returns a pointer to the offset inside the array where the element of the index lies.
-static inline void *r_vector_index_ptr(RVector *vec, size_t index) {
+static inline void *r_vector_index_ptr(const RVector *vec, size_t index) {
 	r_return_val_if_fail (vec && index < vec->capacity, NULL);
 	return (char *)vec->a + (vec->elem_size * index);
 }
 
-static inline void *r_vector_at(RVector *vec, int index) {
-	if (vec && index >= 0 && index < vec->capacity) {
+// returns a pointer to the offset inside the array where the element of the index lies.
+// returns NULL when the index is out of bounds of the vector.
+static inline void *r_vector_at(const RVector *vec, int index) {
+	r_return_val_if_fail (vec, NULL);
+	if (index >= 0 && (size_t)index < vec->len) {
 		return (char *)vec->a + (vec->elem_size * index);
 	}
 	return NULL;
@@ -134,6 +144,21 @@ R_API void *r_vector_shrink(RVector *vec);
 
 R_API void *r_vector_flush(RVector *vec);
 
+static inline R_MUSTUSE int r_vector_index(RVector *vec) {
+	return vec->len - 1;
+}
+
+static inline R_MUSTUSE void *r_vector_end(RVector *vec) {
+	const size_t len = vec->len;
+	if (R_UNLIKELY (len >= vec->capacity)) {
+		const size_t next_capacity = (vec->capacity + 4) * 2;
+		r_vector_reserve (vec, next_capacity);
+	}
+	void *ptr = r_vector_index_ptr (vec, len);
+	vec->len = len + 1;
+	return ptr;
+}
+
 /*
  * example:
  *
@@ -145,7 +170,7 @@ R_API void *r_vector_flush(RVector *vec);
  */
 #define r_vector_foreach(vec, it) \
 	if (!r_vector_empty (vec)) \
-		for (it = (void *)(vec)->a; (char *)it != (char *)(vec)->a + ((vec)->len * (vec)->elem_size); it = (void *)((char *)it + (vec)->elem_size))
+		for (it = (void *)(vec)->a; (char *)it < (char *)(vec)->a + ((vec)->len * (vec)->elem_size); it = (void *)((char *)it + (vec)->elem_size))
 
 #define r_vector_foreach_prev(vec, it) \
 	if (!r_vector_empty (vec)) \
@@ -205,8 +230,8 @@ R_API void r_pvector_clear(RPVector *vec);
 // free the vector and call vec->v.free on every element.
 R_API void r_pvector_free(RPVector *vec);
 
-// TODO: rename to r_pvector_length () for consistency
-static inline size_t r_pvector_len(const RPVector *vec) {
+// TODO: rename to r_pvector_lengthgth () for consistency
+static inline size_t r_pvector_length(const RPVector *vec) {
 	r_return_val_if_fail (vec, 0);
 	return vec->v.len;
 }
@@ -222,7 +247,7 @@ static inline void r_pvector_set(RPVector *vec, size_t index, void *e) {
 }
 
 static inline bool r_pvector_empty(RPVector *vec) {
-	return r_pvector_len (vec) == 0;
+	return r_pvector_length (vec) == 0;
 }
 
 // returns a pointer to the offset inside the array where the element of the index lies.
@@ -302,7 +327,7 @@ static inline void **r_pvector_flush(RPVector *vec) {
  */
 #define r_pvector_foreach(vec, it) \
 	if ((vec)->v.len > 0) \
-	for (it = (void **)(vec)->v.a; it != (void **)(vec)->v.a + (vec)->v.len; it++)
+	for (it = (void **)(vec)->v.a; it < (void **)(vec)->v.a + (vec)->v.len; it++)
 
 // like r_pvector_foreach() but inverse
 #define r_pvector_foreach_prev(vec, it) \

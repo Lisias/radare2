@@ -1,18 +1,15 @@
 /* radare - LGPL - Copyright 2015-2021 nodepad, pancake */
 
-#include <r_types.h>
 #include <r_bin.h>
-#include <r_lib.h>
 #include "mz/mz.h"
-
 
 /* half-magic */
 #define HM(x) (int)((int)(x[0]<<8)|(int)(x[1]))
 
 static Sdb *get_sdb(RBinFile *bf) {
 	const struct r_bin_mz_obj_t *bin;
-	if (bf && bf->o && bf->o->bin_obj) {
-		bin = (struct r_bin_mz_obj_t *)bf->o->bin_obj;
+	if (bf && bf->bo && bf->bo->bin_obj) {
+		bin = (struct r_bin_mz_obj_t *)bf->bo->bin_obj;
 		if (bin && bin->kv) {
 			return bin->kv;
 		}
@@ -21,7 +18,7 @@ static Sdb *get_sdb(RBinFile *bf) {
 }
 
 static bool knownHeaderBuffer(RBuffer *b, ut16 offset) {
-	ut8 h[2];
+	ut8 h[2] = {0};
 	if (r_buf_read_at (b, offset, h, sizeof (h)) != sizeof (h)) {
 		return false;
 	}
@@ -48,7 +45,11 @@ static bool knownHeaderBuffer(RBuffer *b, ut16 offset) {
 static bool checkEntrypointBuffer(RBuffer *b) {
 	st16 cs = r_buf_read_le16_at (b, 0x16);
 	ut16 ip = r_buf_read_le16_at (b, 0x14);
-	ut32 pa = ((r_buf_read_le16_at (b, 0x08) + cs) << 4) + ip;
+	ut16 v = r_buf_read_le16_at (b, 0x08);
+	if ((st16)v < 1) {
+		return false;
+	}
+	ut32 pa = ((v + cs) << 4) + ip;
 
 	/* A minimal MZ header is 0x1B bytes.  Header length is measured in
 	 * 16-byte paragraphs so the minimum header must occupy 2 paragraphs.
@@ -72,7 +73,7 @@ static bool checkEntrypointBuffer(RBuffer *b) {
 	return false;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	r_return_val_if_fail (b, false);
 	ut64 b_size = r_buf_size (b);
 	if (b_size <= 0x3d) {
@@ -103,26 +104,26 @@ static bool check_buffer(RBinFile *bf, RBuffer *b) {
 	return true;
 }
 
-static bool load(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	struct r_bin_mz_obj_t *mz_obj = r_bin_mz_new_buf (buf);
 	if (mz_obj) {
-		sdb_ns_set (sdb, "info", mz_obj->kv);
-		*bin_obj = mz_obj;
+		sdb_ns_set (bf->sdb, "info", mz_obj->kv);
+		bf->bo->bin_obj = mz_obj;
 		return true;
 	}
 	return false;
 }
 
 static void destroy(RBinFile *bf) {
-	r_bin_mz_free ((struct r_bin_mz_obj_t *)bf->o->bin_obj);
+	r_bin_mz_free ((struct r_bin_mz_obj_t *)bf->bo->bin_obj);
 }
 
 static RBinAddr *binsym(RBinFile *bf, int type) {
 	RBinAddr *mzaddr = NULL;
-	if (bf && bf->o && bf->o->bin_obj) {
+	if (bf && bf->bo && bf->bo->bin_obj) {
 		switch (type) {
 		case R_BIN_SYM_MAIN:
-			mzaddr = r_bin_mz_get_main_vaddr (bf->o->bin_obj);
+			mzaddr = r_bin_mz_get_main_vaddr (bf->bo->bin_obj);
 			break;
 		}
 	}
@@ -130,20 +131,18 @@ static RBinAddr *binsym(RBinFile *bf, int type) {
 }
 
 static RList *entries(RBinFile *bf) {
-	RBinAddr *ptr = NULL;
-	RList *res = NULL;
-	if (!(res = r_list_newf (free))) {
-		return NULL;
-	}
-	ptr = r_bin_mz_get_entrypoint (bf->o->bin_obj);
-	if (ptr) {
-		r_list_append (res, ptr);
+	RList *res = r_list_newf (free);
+	if (R_LIKELY (res)) {
+		RBinAddr *ptr = r_bin_mz_get_entrypoint (bf->bo->bin_obj);
+		if (R_LIKELY (ptr)) {
+			r_list_append (res, ptr);
+		}
 	}
 	return res;
 }
 
 static RList *sections(RBinFile *bf) {
-	return r_bin_mz_get_segments (bf->o->bin_obj);
+	return r_bin_mz_get_segments (bf->bo->bin_obj);
 }
 
 static RBinInfo *info(RBinFile *bf) {
@@ -160,7 +159,7 @@ static RBinInfo *info(RBinFile *bf) {
 	ret->type = strdup ("EXEC (Executable file)");
 	ret->subsystem = strdup ("DOS");
 	ret->bits = 16;
-	ret->dbg_info = 0;
+	ret->dbg_info = false;
 	ret->big_endian = false;
 	ret->has_crypto = false;
 	ret->has_canary = false;
@@ -172,7 +171,7 @@ static RBinInfo *info(RBinFile *bf) {
 }
 
 static void header(RBinFile *bf) {
-	const struct r_bin_mz_obj_t *mz = (struct r_bin_mz_obj_t *)bf->o->bin_obj;
+	const struct r_bin_mz_obj_t *mz = (struct r_bin_mz_obj_t *)bf->bo->bin_obj;
 	eprintf ("[0000:0000]  Signature           %c%c\n",
 		mz->dos_header->signature & 0xFF,
 		mz->dos_header->signature >> 8);
@@ -210,13 +209,13 @@ static RList *relocs(RBinFile *bf) {
 	const struct r_bin_mz_reloc_t *relocs = NULL;
 	int i;
 
-	if (!bf || !bf->o || !bf->o->bin_obj) {
+	if (!bf || !bf->bo || !bf->bo->bin_obj) {
 		return NULL;
 	}
 	if (!(ret = r_list_newf (free))) {
 		return NULL;
 	}
-	if (!(relocs = r_bin_mz_get_relocs (bf->o->bin_obj))) {
+	if (!(relocs = r_bin_mz_get_relocs (bf->bo->bin_obj))) {
 		return ret;
 	}
 	for (i = 0; !relocs[i].last; i++) {
@@ -235,13 +234,15 @@ static RList *relocs(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_mz = {
-	.name = "mz",
-	.desc = "MZ bin plugin",
-	.license = "MIT",
+	.meta = {
+		.name = "mz",
+		.desc = "MZ bin plugin",
+		.license = "MIT",
+	},
 	.get_sdb = &get_sdb,
-	.load_buffer = &load,
+	.load = &load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.binsym = &binsym,
 	.entries = &entries,
 	.sections = &sections,

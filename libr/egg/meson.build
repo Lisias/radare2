@@ -5,6 +5,7 @@ r_egg_sources = [
   'emit_arm.c',
   'emit_trace.c',
   'emit_x64.c',
+  'emit_a64.c',
   'emit_esil.c',
   'emit_x86.c',
   #'p/egg_bind.c',
@@ -19,6 +20,10 @@ r_egg = library('r_egg', r_egg_sources,
   c_args: library_cflags,
   dependencies: [
     r_util_dep,
+    r_anal_dep,
+    r_search_dep,
+    r_crypto_dep,
+    r_arch_dep,
     r_asm_dep,
     r_syscall_dep,
     mpc_dep

@@ -1,8 +1,5 @@
 /* radare2 - LGPL - Copyright 2015-2019 - pancake */
 
-// XXX: this plugin have 0 tests and no binaries
-//
-
 #include <r_types.h>
 #include <r_util.h>
 #include <r_lib.h>
@@ -21,10 +18,10 @@ typedef struct sbl_header {
 	ut32 cert_sz;
 } SblHeader;
 
-// TODO avoid globals
+// TODO move this global into the bf->bobj
 static R_TH_LOCAL SblHeader sb = {0};
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	r_return_val_if_fail (b, false);
 	ut64 bufsz = r_buf_size (b);
 	if (sizeof (SblHeader) < bufsz) {
@@ -74,8 +71,8 @@ static bool check_buffer(RBinFile *bf, RBuffer *b) {
 	return false;
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *b, ut64 loadaddr, Sdb *sdb) {
-	return check_buffer (bf, b);
+static bool load(RBinFile *bf, RBuffer *b, ut64 loadaddr) {
+	return check (bf, b);
 }
 
 static ut64 baddr(RBinFile *bf) {
@@ -155,26 +152,24 @@ static RList* sections(RBinFile *bf) {
 }
 
 static RBinInfo* info(RBinFile *bf) {
-	RBinInfo *ret = NULL;
-	const int bits = 16;
-	if (!(ret = R_NEW0 (RBinInfo))) {
-		return NULL;
+	RBinInfo *ret = R_NEW0 (RBinInfo);
+	if (R_LIKELY (ret)) {
+		ret->file = strdup (bf->file);
+		ret->bclass = strdup ("bootloader");
+		ret->rclass = strdup ("mbn");
+		ret->os = strdup ("MBN");
+		ret->arch = strdup ("arm");
+		ret->machine = strdup (ret->arch);
+		ret->subsystem = strdup ("mbn");
+		ret->type = strdup ("sbl"); // secondary boot loader
+		ret->bits = 16;
+		ret->has_va = true;
+		ret->has_crypto = true; // must be false if there' no sign or cert sections
+		ret->has_pi = false;
+		ret->has_nx = false;
+		ret->big_endian = false;
+		ret->dbg_info = false;
 	}
-	ret->file = strdup (bf->file);
-	ret->bclass = strdup ("bootloader");
-	ret->rclass = strdup ("mbn");
-	ret->os = strdup ("MBN");
-	ret->arch = strdup ("arm");
-	ret->machine = strdup (ret->arch);
-	ret->subsystem = strdup ("mbn");
-	ret->type = strdup ("sbl"); // secondary boot loader
-	ret->bits = bits;
-	ret->has_va = true;
-	ret->has_crypto = true; // must be false if there' no sign or cert sections
-	ret->has_pi = false;
-	ret->has_nx = false;
-	ret->big_endian = false;
-	ret->dbg_info = false;
 	return ret;
 }
 
@@ -183,13 +178,15 @@ static ut64 size(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_mbn = {
-	.name = "mbn",
-	.desc = "MBN/SBL bootloader things",
-	.license = "LGPL3",
+	.meta = {
+		.name = "mbn",
+		.desc = "MBN/SBL bootloader things",
+		.license = "LGPL3",
+	},
 	.minstrlen = 10,
-	.load_buffer = &load_buffer,
+	.load = &load,
 	.size = &size,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.baddr = &baddr,
 	.entries = &entries,
 	.sections = &sections,

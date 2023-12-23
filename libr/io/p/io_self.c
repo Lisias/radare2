@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2014-2022 - pancake */
+/* radare - LGPL - Copyright 2014-2023 - pancake */
 
 #include <r_userconf.h>
 #include <r_io.h>
@@ -18,7 +18,7 @@
 #include <mach/task.h>
 #include <mach/task_info.h>
 void macosx_debug_regions (RIO *io, task_t task, mach_vm_address_t address, int max);
-#elif __BSD__
+#elif R2__BSD__
 #if __FreeBSD__
 #include <sys/sysctl.h>
 #include <sys/user.h>
@@ -241,15 +241,15 @@ static int update_self_regions(RIO *io, int pid) {
 	fclose (fd);
 
 	return true;
-#elif __BSD__
+#elif R2__BSD__
 	return bsd_proc_vmmaps(io, pid);
 #elif __HAIKU__
 	image_info ii;
-	int32_t cookie = 0;
+	int32 cookie = 0;
 
 	while (get_next_image_info (0, &cookie, &ii) == B_OK) {
-		self_sections[self_sections_count].from = (ut64)ii.text;
-		self_sections[self_sections_count].to = (ut64)((char*)ii.text + ii.text_size);
+		self_sections[self_sections_count].from = (ut64)(size_t)ii.text;
+		self_sections[self_sections_count].to = (ut64)(size_t)((char*)ii.text + ii.text_size);
 		self_sections[self_sections_count].name = strdup (ii.name);
 		self_sections[self_sections_count].perm = 0;
 		self_sections_count++;
@@ -390,6 +390,7 @@ static int __read(RIO *io, RIODesc *fd, ut8 *buf, int len) {
 			return newlen;
 		}
 	}
+	memset (buf, 0xff, len);
 	return 0;
 }
 
@@ -410,15 +411,25 @@ static int __write(RIO *io, RIODesc *fd, const ut8 *buf, int len) {
 
 static ut64 __lseek(RIO *io, RIODesc *fd, ut64 offset, int whence) {
 	switch (whence) {
-	case SEEK_SET: return offset;
-	case SEEK_CUR: return io->off + offset;
-	case SEEK_END: return UT64_MAX;
+	case SEEK_SET:
+		io->off = offset;
+		return offset;
+	case SEEK_CUR:
+		io->off += offset;
+		return io->off;
+	case SEEK_END:
+		if (sizeof (void*) == 8) {
+			io->off = UT64_MAX;
+		} else {
+			io->off = UT32_MAX;
+		}
+		return UT64_MAX;
 	}
 	return offset;
 }
 
 static void got_alarm(int sig) {
-#if !defined(__WINDOWS__)
+#if !defined(R2__WINDOWS__)
 	// !!! may die if not running from r2preload !!! //
 	kill (r_sys_getpid (), SIGUSR1);
 #endif
@@ -429,7 +440,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 		return r_str_newf ("%d", fd->fd);
 	} else if (r_str_startswith (cmd, "pid")) {
 		/* do nothing here */
-#if !defined(__WINDOWS__)
+#if !defined(R2__WINDOWS__)
 	} else if (r_str_startswith (cmd, "kill")) {
 		if (r_sandbox_enable (false)) {
 			R_LOG_ERROR ("This is unsafe, so disabled by the sandbox");
@@ -529,7 +540,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 		}
 		eprintf ("RES %"PFMT64d"\n", result);
 		free (argv);
-#if !defined(__WINDOWS__) && !defined (__serenity__)
+#if !defined(R2__WINDOWS__) && !defined (__serenity__)
 	} else if (r_str_startswith (cmd, "alarm ")) {
 		struct itimerval tmout;
 		int secs = atoi (cmd + 6);
@@ -576,7 +587,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 		eprintf (" :pid               show getpid()\n");
 		eprintf (" :maps              show map regions (same as :dm)\n");
 		eprintf (" :kill              commit suicide\n");
-#if !defined(__WINDOWS__)
+#if !defined(R2__WINDOWS__)
 		eprintf (" :alarm [secs]      setup alarm signal to raise r2 prompt\n");
 #endif
 		eprintf (" :dlsym [sym]       dlopen\n");
@@ -587,10 +598,12 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 }
 
 RIOPlugin r_io_plugin_self = {
-	.name = "self",
-	.desc = "Read memory from self",
+	.meta = {
+		.name = "self",
+		.desc = "Read memory from self",
+		.license = "LGPL3",
+	},
 	.uris = "self://",
-	.license = "LGPL3",
 	.open = __open,
 	.read = __read,
 	.check = __plugin_open,
@@ -711,7 +724,7 @@ void macosx_debug_regions(RIO *io, task_t task, mach_vm_address_t address, int m
 		}
 	}
 }
-#elif __BSD__
+#elif R2__BSD__
 bool bsd_proc_vmmaps(RIO *io, int pid) {
 #if __FreeBSD__
 	size_t size;
@@ -942,8 +955,10 @@ exit:
 
 #else // DEBUGGER
 RIOPlugin r_io_plugin_self = {
-	.name = "self",
-	.desc = "read memory from myself using 'self://' (UNSUPPORTED)",
+	.meta = {
+		.name = "self",
+		.desc = "read memory from myself using 'self://' (UNSUPPORTED)",
+	},
 };
 
 #ifndef R2_PLUGIN_INCORE

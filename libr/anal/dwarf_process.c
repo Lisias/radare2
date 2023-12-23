@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2012-2022 - houndthe */
+/* radare - LGPL - Copyright 2012-2023 - houndthe */
 
 #include <r_anal.h>
 #include <r_bin_dwarf.h>
@@ -16,8 +16,8 @@ typedef struct dwarf_parse_context_t {
 
 typedef struct dwarf_function_t {
 	ut64 addr;
-	const char *name;
-	const char *signature;
+	char *name;
+	char *signature;
 	bool is_external;
 	bool is_method;
 	bool is_virtual;
@@ -383,7 +383,7 @@ static st32 parse_type(Context *ctx, const ut64 offset, RStrBuf *strbuf, ut64 *s
 
 /**
  * @brief Parses structured entry into *result RAnalStructMember
- * http://www.dwarfstd.org/doc/DWARF4.pdf#page=102&zoom=100,0,0
+ * https://www.dwarfstd.org/doc/DWARF4.pdf#page=102&zoom=100,0,0
  *
  * @param ctx
  * @param idx index of the current entry
@@ -425,7 +425,7 @@ static RAnalStructMember *parse_struct_member(Context *ctx, ut64 idx, RAnalStruc
 				the beginning of containing entity. If containing entity has
 				a bit offset, member has that bit offset aswell
 				2.: value is a location description
-				http://www.dwarfstd.org/doc/DWARF4.pdf#page=39&zoom=100,0,0
+				https://www.dwarfstd.org/doc/DWARF4.pdf#page=39&zoom=100,0,0
 			*/
 			offset = value->uconstant;
 			break;
@@ -464,7 +464,7 @@ cleanup:
 
 /**
  * @brief  Parses enum entry into *result RAnalEnumCase
- * http://www.dwarfstd.org/doc/DWARF4.pdf#page=110&zoom=100,0,0
+ * https://www.dwarfstd.org/doc/DWARF4.pdf#page=110&zoom=100,0,0
  *
  * @param ctx
  * @param idx index of the current entry
@@ -512,7 +512,7 @@ cleanup:
  * @param ctx
  * @param idx index of the current entry
  */
-// http://www.dwarfstd.org/doc/DWARF4.pdf#page=102&zoom=100,0,0
+// https://www.dwarfstd.org/doc/DWARF4.pdf#page=102&zoom=100,0,0
 static void parse_structure_type(Context *ctx, ut64 idx) {
 	const RBinDwarfDie *die = &ctx->all_dies[idx];
 
@@ -649,7 +649,7 @@ cleanup:
  * @brief Parses a typedef entry into RAnalBaseType and saves it
  *        using r_anal_save_base_type ()
  *
- * http://www.dwarfstd.org/doc/DWARF4.pdf#page=96&zoom=100,0,0
+ * https://www.dwarfstd.org/doc/DWARF4.pdf#page=96&zoom=100,0,0
  *
  * @param ctx
  * @param idx index of the current entry
@@ -1593,6 +1593,7 @@ static void sdb_save_dwarf_function(Function *dwarf_fcn, RList/*<Variable*>*/ *v
  * @param ctx
  * @param idx Current entry index
  */
+#define estrdup(x) (x)?strdup((x)):NULL
 static void parse_function(Context *ctx, ut64 idx) {
 	const RBinDwarfDie *die = &ctx->all_dies[idx];
 
@@ -1611,12 +1612,12 @@ static void parse_function(Context *ctx, ut64 idx) {
 		switch (die->attr_values[i].attr_name) {
 		case DW_AT_name:
 			if (!get_linkage_name || !has_linkage_name) {
-				fcn.name = val->string.content;
+				fcn.name = estrdup (val->string.content);
 			}
 			break;
 		case DW_AT_linkage_name:
 		case DW_AT_MIPS_linkage_name:
-			fcn.name = val->string.content;
+			fcn.name = estrdup (val->string.content);
 			has_linkage_name = true;
 			break;
 		case DW_AT_low_pc:
@@ -1627,7 +1628,8 @@ static void parse_function(Context *ctx, ut64 idx) {
 		{
 			RBinDwarfDie *spec_die = ht_up_find (ctx->die_map, val->reference, NULL);
 			if (spec_die) {
-				fcn.name = get_specification_die_name (spec_die); /* I assume that if specification has a name, this DIE hasn't */
+				/* I assume that if specification has a name, this DIE hasn't */
+				fcn.name = estrdup (get_specification_die_name (spec_die));
 				get_spec_die_type (ctx, spec_die, &ret_type);
 			}
 			break;
@@ -1675,15 +1677,21 @@ static void parse_function(Context *ctx, ut64 idx) {
 	if (ret_type.len == 0) { /* DW_AT_type is omitted in case of `void` ret type */
 		r_strbuf_append (&ret_type, "void");
 	}
+
 	r_warn_if_fail (ctx->lang);
-	char *new_name = ctx->anal->binb.demangle
-		? ctx->anal->binb.demangle (NULL, ctx->lang, fcn.name, fcn.addr, false): NULL;
-	fcn.name = new_name ? new_name : strdup (fcn.name);
+	if (ctx->anal->binb.demangle) {
+		char *mangled_name = fcn.name;
+		char *demangled_name = ctx->anal->binb.demangle (NULL, ctx->lang, mangled_name, fcn.addr, false);
+		if (demangled_name) {
+			fcn.name = demangled_name;
+			free (mangled_name);
+		}
+	}
 	fcn.signature = r_str_newf ("%s %s(%s);", r_strbuf_get (&ret_type), fcn.name, r_strbuf_get (&args));
 	sdb_save_dwarf_function (&fcn, variables, ctx->sdb);
 
-	free ((char *)fcn.signature);
-	free ((char *)fcn.name);
+	free (fcn.signature);
+	free (fcn.name);
 
 	RListIter *iter;
 	Variable *var;

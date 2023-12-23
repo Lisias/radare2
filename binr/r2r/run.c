@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2020-2022 - pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2020-2023 - pancake, thestr4ng3r */
 
 #include "r2r.h"
 
@@ -14,7 +14,7 @@ static int execvp(const char *a, char **b) {return -1;}
 #define __SIG_IGN 0
 #endif
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 struct r2r_subprocess_t {
 	HANDLE stdin_write;
 	HANDLE stdout_read;
@@ -212,7 +212,7 @@ R_API R2RSubprocess *r2r_subprocess_start(
 			NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT, env,
 			NULL, &start_info, &proc_info)) {
 		free (env);
-		eprintf ("CreateProcess failed: %#x\n", (int)GetLastError ());
+		R_LOG_ERROR ("CreateProcess failed: %#x", (int)GetLastError ());
 		goto error;
 	}
 	free (env);
@@ -816,7 +816,7 @@ static R2RProcessOutput *subprocess_runner(const char *file, const char *args[],
 	return out;
 }
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 static char *convert_win_cmds(const char *cmds) {
 	char *r = malloc (strlen (cmds) + 1);
 	if (!r) {
@@ -882,13 +882,22 @@ static char *convert_win_cmds(const char *cmds) {
 }
 #endif
 
-static R2RProcessOutput *run_r2_test(R2RRunConfig *config, ut64 timeout_ms, const char *cmds, RList *files, RList *extra_args, bool load_plugins, R2RCmdRunner runner, void *user) {
+static R2RProcessOutput *run_r2_test(R2RRunConfig *config, ut64 timeout_ms, int repeat, const char *cmds, RList *files, RList *extra_args, RList * extra_env, bool load_plugins, R2RCmdRunner runner, void *user) {
 	RPVector args;
+	RPVector envvars;
+	RPVector envvals;
+	r_pvector_init (&envvars, NULL);
+	r_pvector_init (&envvals, NULL);
 	r_pvector_init (&args, NULL);
+
 	r_pvector_push (&args, "-escr.utf8=0");
+	// r_pvector_push (&args, "-ebin.types=false");
 	r_pvector_push (&args, "-escr.color=0");
 	r_pvector_push (&args, "-escr.interactive=0");
-	r_pvector_push (&args, "-N");
+
+	if (!load_plugins) {
+		r_pvector_push (&args, "-NN");
+	}
 	RListIter *it;
 	void *extra_arg, *file_arg;
 	if (extra_args) {
@@ -897,7 +906,7 @@ static R2RProcessOutput *run_r2_test(R2RRunConfig *config, ut64 timeout_ms, cons
 		}
 	}
 	r_pvector_push (&args, "-Qc");
-#if __WINDOWS__
+#if R2__WINDOWS__
 	char *wcmds = convert_win_cmds (cmds);
 	r_pvector_push (&args, wcmds);
 #else
@@ -907,26 +916,49 @@ static R2RProcessOutput *run_r2_test(R2RRunConfig *config, ut64 timeout_ms, cons
 		r_pvector_push (&args, file_arg);
 	}
 
-	const char *envvars[] = {
-#if __WINDOWS__
-		"ANSICON",
+#if R2__WINDOWS__
+	r_pvector_push (&envvars, "ANSICON");
+	r_pvector_push (&envvals, "1");
 #endif
-		"R2_NOPLUGINS"
-	};
-	const char *envvals[] = {
-#if __WINDOWS__
-		"1",
-#endif
-		"1"
-	};
-#if __WINDOWS__
-	size_t env_size = load_plugins ? 1 : 2;
-#else
-	size_t env_size = load_plugins ? 0 : 1;
-#endif
-	R2RProcessOutput *out = runner (config->r2_cmd, args.v.a, r_pvector_len (&args), envvars, envvals, env_size, timeout_ms, user);
+	if (!load_plugins) {
+		r_pvector_push (&envvars, "R2_NOPLUGINS");
+		r_pvector_push (&envvals, "1");
+	}
+	
+	if (extra_env)
+	{
+		RListIter * eit;
+		char * kv;
+
+		r_list_foreach (extra_env, eit, kv) {
+			char * equal = strstr (kv, "=");
+			if (!equal) {
+				continue;
+			}
+			*equal = 0;
+			r_pvector_push (&envvars, kv);
+			r_pvector_push (&envvals, equal + 1);
+		}
+	}
+
+	size_t env_size = r_pvector_length (&envvars);
+
+	R2RProcessOutput *out;
+	if (repeat > 1) {
+		int rep = repeat;
+		while (rep-- > 0) {
+			out = runner (config->r2_cmd, args.v.a,
+				r_pvector_length (&args), envvars.v.a, envvals.v.a, env_size, timeout_ms, user);
+		}
+	} else {
+		out = runner (config->r2_cmd, args.v.a,
+			r_pvector_length (&args), envvars.v.a, envvals.v.a, env_size, timeout_ms, user);
+	}
+
 	r_pvector_clear (&args);
-#if __WINDOWS__
+	r_pvector_clear (&envvars);
+	r_pvector_clear (&envvals);
+#if R2__WINDOWS__
 	free (wcmds);
 #endif
 	return out;
@@ -937,6 +969,7 @@ R_API R2RProcessOutput *r2r_run_cmd_test(R2RRunConfig *config, R2RCmdTest *test,
 	RList *files = test->file.value? r_str_split_duplist (test->file.value, "\n", true): NULL;
 	RListIter *it;
 	RListIter *tmpit;
+	RList * extra_env = NULL;
 	char *token;
 	if (extra_args) {
 		r_list_foreach_safe (extra_args, it, tmpit, token) {
@@ -962,10 +995,16 @@ R_API R2RProcessOutput *r2r_run_cmd_test(R2RRunConfig *config, R2RCmdTest *test,
 		}
 		r_list_push (files, "-");
 	}
-	ut64 timeout_ms = test->timeout.set? test->timeout.value * 1000: config->timeout_ms;
-	R2RProcessOutput *out = run_r2_test (config, timeout_ms, test->cmds.value, files, extra_args, test->load_plugins, runner, user);
+	if (test->env.value) {
+		extra_env = r_str_split_duplist (test->env.value, ";", true);
+	}
+	int repeat = test->repeat.value;
+	const ut64 timeout_ms = test->timeout.set? test->timeout.value * 1000: config->timeout_ms;
+	R2RProcessOutput *out = run_r2_test (config, timeout_ms, repeat,
+			test->cmds.value, files, extra_args, extra_env, test->load_plugins, runner, user);
 	r_list_free (extra_args);
 	r_list_free (files);
+	r_list_free (extra_env);
 	return out;
 }
 
@@ -999,7 +1038,7 @@ R_API bool r2r_check_jq_available(void) {
 	const char *invalid_json = "this is not json lol";
 	R2RSubprocess *proc = r2r_subprocess_start (JQ_CMD, args, 1, NULL, NULL, 0);
 	if (!proc) {
-		eprintf ("Cnnot start subprocess\n");
+		R_LOG_ERROR ("Cannot start subprocess");
 		return false;
 	}
 	r2r_subprocess_stdin_write (proc, (const ut8 *)invalid_json, strlen (invalid_json));
@@ -1029,7 +1068,8 @@ R_API bool r2r_check_jq_available(void) {
 R_API R2RProcessOutput *r2r_run_json_test(R2RRunConfig *config, R2RJsonTest *test, R2RCmdRunner runner, void *user) {
 	RList *files = r_list_new ();
 	r_list_push (files, (void *)config->json_test_file);
-	R2RProcessOutput *ret = run_r2_test (config, config->timeout_ms, test->cmd, files, NULL, test->load_plugins, runner, user);
+	// TODO: config->timeout_ms is already inside config, no need to pass it twice! chk other calls
+	R2RProcessOutput *ret = run_r2_test (config, config->timeout_ms, 1, test->cmd, files, NULL, NULL, test->load_plugins, runner, user);
 	r_list_free (files);
 	return ret;
 }
@@ -1088,7 +1128,7 @@ R_API R2RAsmTestOutput *r2r_run_asm_test(R2RRunConfig *config, R2RAsmTest *test)
 	r_strbuf_init (&cmd_buf);
 	if (test->mode & R2R_ASM_TEST_MODE_ASSEMBLE) {
 		r_pvector_push (&args, test->disasm);
-		R2RSubprocess *proc = r2r_subprocess_start (config->rasm2_cmd, args.v.a, r_pvector_len (&args), NULL, NULL, 0);
+		R2RSubprocess *proc = r2r_subprocess_start (config->rasm2_cmd, args.v.a, r_pvector_length (&args), NULL, NULL, 0);
 		if (!r2r_subprocess_wait (proc, config->timeout_ms)) {
 			r2r_subprocess_kill (proc);
 			out->as_timeout = true;
@@ -1126,7 +1166,7 @@ rip:
 		}
 		r_pvector_push (&args, "-d");
 		r_pvector_push (&args, hex);
-		R2RSubprocess *proc = r2r_subprocess_start (config->rasm2_cmd, args.v.a, r_pvector_len (&args), NULL, NULL, 0);
+		R2RSubprocess *proc = r2r_subprocess_start (config->rasm2_cmd, args.v.a, r_pvector_length (&args), NULL, NULL, 0);
 		if (!r2r_subprocess_wait (proc, config->timeout_ms)) {
 			r2r_subprocess_kill (proc);
 			out->disas_timeout = true;
@@ -1189,7 +1229,7 @@ R_API R2RProcessOutput *r2r_run_fuzz_test(R2RRunConfig *config, R2RFuzzTest *tes
 	const char *cmd = "aaa";
 	RList *files = r_list_new ();
 	r_list_push (files, test->file);
-	R2RProcessOutput *ret = run_r2_test (config, config->timeout_ms, cmd, files, NULL, false, runner, user);
+	R2RProcessOutput *ret = run_r2_test (config, config->timeout_ms, 1, cmd, files, NULL, NULL, false, runner, user);
 	r_list_free (files);
 	return ret;
 }
@@ -1246,17 +1286,19 @@ static bool require_check(const char *require) {
 	}
 	bool res = true;
 	if (strstr (require, "gas")) {
-		res &= r_file_exists ("/usr/bin/as");
+		char *as_bin = r_file_path ("as");
+		res &= (bool)as_bin;
+		free (as_bin);
 	}
 	if (strstr (require, "unix")) {
-#if __UNIX__
+#if R2__UNIX__
 		res &= true;
 #else
 		res = false;
 #endif
 	}
 	if (strstr (require, "windows")) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 		res &= true;
 #else
 		res = false;

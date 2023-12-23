@@ -2,9 +2,7 @@
 
 #include <r_anal.h>
 #include <r_vector.h>
-#include <r_util/r_graph_drawable.h>
-#include "../include/r_anal.h"
-#include "../include/r_util/r_graph.h"
+#include <r_util.h>
 
 static void r_anal_class_base_delete_class(RAnal *anal, const char *class_name);
 static void r_anal_class_method_delete_class(RAnal *anal, const char *class_name);
@@ -564,7 +562,11 @@ R_API RVector/*<RAnalMethod>*/ *r_anal_class_method_get_all(RAnal *anal, const c
 	free (class_name_sanitized);
 	free (attr_type_attrs_key);
 
-	r_vector_reserve (vec, (size_t) sdb_alen (array));
+	int amount = sdb_alen (array);
+	if (!r_vector_reserve (vec, (size_t) amount?amount:1)) {
+		r_vector_free (vec);
+		return NULL;
+	}
 	char *cur;
 	sdb_aforeach (cur, array) {
 		RAnalMethod meth;
@@ -732,7 +734,11 @@ R_API RVector/*<RAnalBaseClass>*/ *r_anal_class_base_get_all(RAnal *anal, const 
 	free (class_name_sanitized);
 	free (attr_type_attrs);
 
-	r_vector_reserve (vec, (size_t) sdb_alen (array));
+	int amount = sdb_alen (array);
+	if (!r_vector_reserve (vec, (size_t)(amount > 0)? amount: 1)) {
+		r_vector_free (vec);
+		return NULL;
+	}
 	char *cur;
 	sdb_aforeach (cur, array) {
 		RAnalBaseClass base;
@@ -918,7 +924,10 @@ R_API RVector/*<RAnalVTable>*/ *r_anal_class_vtable_get_all(RAnal *anal, const c
 	free (class_name_sanitized);
 	free (attr_type_attrs);
 
-	r_vector_reserve (vec, (size_t) sdb_alen (array));
+	if (!r_vector_reserve (vec, (size_t) sdb_alen (array))) {
+		r_vector_free (vec);
+		return NULL;
+	}
 	char *cur;
 	sdb_aforeach (cur, array) {
 		RAnalVTable vtable;
@@ -1242,11 +1251,13 @@ R_API void r_anal_class_list_bases(RAnal *anal, const char *class_name) {
 	free (class_name_sanitized);
 
 	RVector *bases = r_anal_class_base_get_all (anal, class_name);
-	RAnalBaseClass *base;
-	r_vector_foreach (bases, base) {
-		r_cons_printf ("  %4s %s @ +0x%"PFMT64x"\n", base->id, base->class_name, base->offset);
+	if (bases) {
+		RAnalBaseClass *base;
+		r_vector_foreach (bases, base) {
+			r_cons_printf ("  %4s %s @ +0x%"PFMT64x"\n", base->id, base->class_name, base->offset);
+		}
+		r_vector_free (bases);
 	}
-	r_vector_free (bases);
 }
 
 R_API void r_anal_class_list_vtables(RAnal *anal, const char *class_name) {
@@ -1360,6 +1371,9 @@ R_API RGraph *r_anal_class_get_inheritance_graph(RAnal *anal) {
 		}
 		// create edges between node and it's parents
 		RVector *bases = r_anal_class_base_get_all (anal, name);
+		if (!bases) {
+			goto failure;
+		}
 		RAnalBaseClass *base;
 		r_vector_foreach (bases, base) {
 			bool base_found = false;

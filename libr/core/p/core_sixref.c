@@ -29,10 +29,8 @@ static void siguza_xrefs_chunked(RCore *core, ut64 search, int lenbytes) {
 				addref (core, addr, target, R_ANAL_REF_TYPE_DATA); // is_adrp matters?
 			} else if (target == search) {
 				r_cons_printf ("%#"PFMT64x": %s x%u, %#"PFMT64x"\n", addr, is_adrp ? "adrp" : "adr", reg, target);
-			}
-			// More complicated cases - up to 3 instr
-			else
-			{
+			} else {
+				// More complicated cases - up to 3 instr
 				ut32 *q = p + 1;
 				while (q < e && *q == 0xd503201f) // nop
 				{
@@ -97,12 +95,9 @@ static void siguza_xrefs_chunked(RCore *core, ut64 search, int lenbytes) {
 								{
 									ut64 uoff = ((v >> 10) & 0xfff) << size;
 									if (target + aoff + uoff == search) {
-										if (aoff) // Have add
-										{
+										if (aoff) { // Have add
 											r_cons_printf("%#"PFMT64x": %s x%u, %#"PFMT64x"; add x%u, x%u, %#x; %s %s%u, [x%u, %#"PFMT64x"]\n", addr, is_adrp ? "adrp" : "adr", reg, target, reg2, reg, aoff, inst, rs, v & 0x1f, reg2, uoff);
-										}
-										else // Have no add
-										{
+										} else { // Have no add
 											r_cons_printf("%#"PFMT64x": %s x%u, %#"PFMT64x"; %s %s%u, [x%u, %#"PFMT64x"]\n", addr, is_adrp ? "adrp" : "adr", reg, target, inst, rs, v & 0x1f, reg2, uoff);
 										}
 									}
@@ -113,40 +108,35 @@ static void siguza_xrefs_chunked(RCore *core, ut64 search, int lenbytes) {
 										if ((v & 0x400) == 0) {
 											if ((v & 0x800) == 0) // unscaled
 											{
-												switch((opc << 4) | size)
-												{
-													case 0x00:            inst = "sturb";  break;
-													case 0x01:            inst = "sturh";  break;
-													case 0x02: case 0x03: inst = "stur";   break;
-													case 0x10:            inst = "ldurb";  break;
-													case 0x11:            inst = "ldurh";  break;
-													case 0x12: case 0x13: inst = "ldur";   break;
-													case 0x20: case 0x30: inst = "ldursb"; break;
-													case 0x21: case 0x31: inst = "ldursh"; break;
-													case 0x22:            inst = "ldursw"; break;
+												switch((opc << 4) | size) {
+												case 0x00:            inst = "sturb";  break;
+												case 0x01:            inst = "sturh";  break;
+												case 0x02: case 0x03: inst = "stur";   break;
+												case 0x10:            inst = "ldurb";  break;
+												case 0x11:            inst = "ldurh";  break;
+												case 0x12: case 0x13: inst = "ldur";   break;
+												case 0x20: case 0x30: inst = "ldursb"; break;
+												case 0x21: case 0x31: inst = "ldursh"; break;
+												case 0x22:            inst = "ldursw"; break;
 												}
-											}
-											else // unprivileged
-											{
-												switch((opc << 4) | size)
-												{
-													case 0x00:            inst = "sttrb";  break;
-													case 0x01:            inst = "sttrh";  break;
-													case 0x02: case 0x03: inst = "sttr";   break;
-													case 0x10:            inst = "ldtrb";  break;
-													case 0x11:            inst = "ldtrh";  break;
-													case 0x12: case 0x13: inst = "ldtr";   break;
-													case 0x20: case 0x30: inst = "ldtrsb"; break;
-													case 0x21: case 0x31: inst = "ldtrsh"; break;
-													case 0x22:            inst = "ldtrsw"; break;
+											} else { // unprivileged
+												switch((opc << 4) | size) {
+												case 0x00:            inst = "sttrb";  break;
+												case 0x01:            inst = "sttrh";  break;
+												case 0x02: case 0x03: inst = "sttr";   break;
+												case 0x10:            inst = "ldtrb";  break;
+												case 0x11:            inst = "ldtrh";  break;
+												case 0x12: case 0x13: inst = "ldtr";   break;
+												case 0x20: case 0x30: inst = "ldtrsb"; break;
+												case 0x21: case 0x31: inst = "ldtrsh"; break;
+												case 0x22:            inst = "ldtrsw"; break;
 												}
 											}
 											if (aoff) // Have add
 											{
 												r_cons_printf("%#"PFMT64x": %s x%u, %#"PFMT64x"; add x%u, x%u, %#x; %s %s%u, [x%u, %s%"PFMT64d"]\n",
 													addr, is_adrp ? "adrp" : "adr", reg, target, reg2, reg, aoff, inst, rs, v & 0x1f, reg2, sign, (st64)soff);
-											}
-											else // Have no add
+											} else // Have no add
 											{
 												r_cons_printf("%#"PFMT64x": %s x%u, %#"PFMT64x"; %s %s%u, [x%u, %s%"PFMT64d"]\n", addr, is_adrp ? "adrp" : "adr", reg, target, inst, rs, v & 0x1f, reg2, sign, (st64)soff);
 											}
@@ -216,7 +206,7 @@ static void siguza_xrefs_chunked(RCore *core, ut64 search, int lenbytes) {
 				addref (core, addr, addr + off, R_ANAL_REF_TYPE_CODE);
 				// r_cons_printf ("ax 0x%"PFMT64x" 0x%"PFMT64x"\n", addr + off, addr);
 			} else if (addr + off == search) {
-				const char *cond;
+				const char *cond = "al";
 				switch(v & 0xf)
 				{
 					case 0x0: cond = "eq"; break;
@@ -236,7 +226,7 @@ static void siguza_xrefs_chunked(RCore *core, ut64 search, int lenbytes) {
 					case 0xe: cond = "al"; break;
 					case 0xf: cond = "nv"; break;
 				}
-				r_cons_printf("%#"PFMT64x": b.%s %#"PFMT64x"\n", addr, cond, search);
+				r_cons_printf ("%#"PFMT64x": b.%s %#"PFMT64x"\n", addr, cond, search);
 			}
 		}
 		else if ((v & 0x7e000000) == 0x34000000) // cbz and cbnz
@@ -299,6 +289,12 @@ static void siguza_xrefs(RCore *core, ut64 search, ut64 start, int lenbytes) {
 }
 
 static int r_cmdsixref_call(void *user, const char *input) {
+	static RCoreHelpMessage help_msg_sixref = {
+		"Usage:", "sixref", "Fast xref discovery in arm64 executable sections",
+		"sixref", " [addr] [len]", "find xrefs in arm64 executable sections",
+		NULL
+	};
+
 	if (!r_str_startswith (input, "sixref")) {
 		return false;
 	}
@@ -309,7 +305,7 @@ static int r_cmdsixref_call(void *user, const char *input) {
 	const int bits = r_config_get_i (core->config, "asm.bits");
 
 	if (*input == '?') {
-		eprintf ("Usage: sixref [address] [len]   Find x-refs in executable sections (arm64 only but fast!)\n");
+		r_core_cmd_help (core, help_msg_sixref);
 		goto done;
 	}
 
@@ -353,7 +349,7 @@ static int r_cmdsixref_call(void *user, const char *input) {
 			R_LOG_INFO ("Current offset is not 4-byte aligned, using 0x%"PFMT64x" instaed", offset);
 		}
 
-		RBinSection *s = r_bin_get_section_at (core->bin->cur->o, offset, true);
+		RBinSection *s = r_bin_get_section_at (core->bin->cur->bo, offset, true);
 		if (!s || !(s->perm & R_PERM_X)) {
 			R_LOG_WARN ("Current section is not executable");
 			goto done;
@@ -373,9 +369,11 @@ done:
 }
 
 RCorePlugin r_core_plugin_sixref = {
-	.name = "sixref",
-	.desc = "quickly find xrefs in arm64 buffer",
-	.license = "MIT",
+	.meta = {
+		.name = "sixref",
+		.desc = "quickly find xrefs in arm64 buffer",
+		.license = "MIT",
+	},
 	.call = r_cmdsixref_call,
 };
 

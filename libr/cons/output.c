@@ -5,7 +5,7 @@
 #include <r_util/r_assert.h>
 #define I r_cons_singleton ()
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 
 static void __fill_tail(int cols, int lines) {
 	lines++;
@@ -29,7 +29,7 @@ R_API void r_cons_w32_clear(void) {
 	COORD startCoords;
 	DWORD dummy;
 	if (I->vtmode) {
-		r_cons_strcat (Color_RESET R_CONS_CLEAR_SCREEN);
+		r_cons_print (Color_RESET R_CONS_CLEAR_SCREEN);
 		return;
 	}
 	if (I->is_wine == 1) {
@@ -238,7 +238,7 @@ static int r_cons_w32_hprint(DWORD hdl, const char *ptr, int len, bool vmode) {
 					}
 					break;
 				case 1:
-					if (ptr[i]=='H') {
+					if (ptr[i] == 'H') {
 						x = atoi (ptr2);
 						state = -2; // END OK
 					} else if (ptr[i] >='0' && ptr[i]<='9') {
@@ -256,7 +256,7 @@ static int r_cons_w32_hprint(DWORD hdl, const char *ptr, int len, bool vmode) {
 				continue;
 			}
 			bool bright = false;
-			if (ptr[0]=='0' && ptr[1] == ';' && ptr[2]=='0') {
+			if (ptr[0] == '0' && ptr[1] == ';' && ptr[2] == '0') {
 				// \x1b[0;0H
 				/** clear screen if gotoxy **/
 				if (vmode) {
@@ -269,13 +269,13 @@ static int r_cons_w32_hprint(DWORD hdl, const char *ptr, int len, bool vmode) {
 				ptr += 3;
 				str = ptr + 1;
 				continue;
-			} else if (ptr[0]=='2'&&ptr[1]=='J') {
+			} else if (ptr[0] == '2' && ptr[1] == 'J') {
 				r_cons_w32_clear ();
 				esc = 0;
 				ptr = ptr + 1;
 				str = ptr + 1;
 				continue;
-			} else if (ptr[0]=='0'&&(ptr[1]=='m' || ptr [1]=='K')) {
+			} else if (ptr[0] == '0' && (ptr[1] == 'm' || ptr [1] == 'K')) {
 				SetConsoleTextAttribute (hConsole, 1|2|4|8);
 				fg = 1|2|4|8;
 				bg = 0;
@@ -285,7 +285,7 @@ static int r_cons_w32_hprint(DWORD hdl, const char *ptr, int len, bool vmode) {
 				str = ptr + 1;
 				continue;
 				// reset color
-			} else if (ptr[0]=='2'&&ptr[1]=='7'&&ptr[2]=='m') {
+			} else if (ptr[0] == '2' && ptr[1] == '7' && ptr[2] == 'm') {
 				SetConsoleTextAttribute (hConsole, bg|fg);
 				inv = 0;
 				esc = 0;
@@ -293,7 +293,7 @@ static int r_cons_w32_hprint(DWORD hdl, const char *ptr, int len, bool vmode) {
 				str = ptr + 1;
 				continue;
 				// invert off
-			} else if (ptr[0]=='7'&&ptr[1]=='m') {
+			} else if (ptr[0] == '7' && ptr[1] == 'm') {
 				SetConsoleTextAttribute (hConsole, bg|fg|COMMON_LVB_REVERSE_VIDEO);
 				inv = COMMON_LVB_REVERSE_VIDEO;
 				esc = 0;

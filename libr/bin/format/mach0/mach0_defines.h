@@ -171,6 +171,7 @@ enum LoadCommandType {
 	LC_BUILD_VERSION        = 0x00000032u,
 	LC_DYLD_EXPORTS_TRIE    = 0x80000033u,
 	LC_DYLD_CHAINED_FIXUPS  = 0x80000034u,
+	LC_AOT_METADATA         = 0xcacaca01u,
 	LC_KEXT  = 0x80000035u, /* TODO: get the right name */
 /*
 Load command 9
@@ -260,6 +261,9 @@ enum SectionType {
 	/// S_THREAD_LOCAL_INIT_FUNCTION_POINTERS - Section with thread local
 	/// variable initialization pointers to functions.
 	S_THREAD_LOCAL_INIT_FUNCTION_POINTERS = 0x15u,
+
+	/// 32-bit offsets to initializers
+	S_INIT_FUNC_OFFSETS = 0x16u,
 
 	LAST_KNOWN_SECTION_TYPE = S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
 };

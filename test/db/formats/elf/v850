@@ -1,18 +1,23 @@
 NAME=ELF: ired v800
 FILE=bins/v850/ired_v850
 CMDS=<<EOF
+aia
+?e --
 i
 s+4
 pd 3
 EOF
 EXPECT=<<EOF
+minopsz 2
+maxopsz 8
+invopsz 1
+dtalign 2
+codealign 2
+--
 fd       3
 file     bins/v850/ired_v850
 size     0xedeb8
 humansz  951.7K
-minopsz  2
-maxopsz  8
-pcalign  2
 mode     r-x
 format   elf
 iorw     false
@@ -25,6 +30,7 @@ binsz    973677
 bintype  elf
 bits     32
 canary   false
+injprot  true
 class    ELF32
 compiler GCC: (GNU) 9.3.0
 flags    0xf0100000
@@ -40,6 +46,7 @@ nx       false
 os       linux
 pic      false
 relocs   true
+relro    no
 rpath    NONE
 sanitize false
 static   true

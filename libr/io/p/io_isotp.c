@@ -1,11 +1,11 @@
-/* radare - LGPL - Copyright 2021 - pancake */
+/* radare - LGPL - Copyright 2021-2023 - pancake */
 
 #include <r_io.h>
+
+#if __linux__ && HAVE_LINUX_CAN_H
+
 #include <r_lib.h>
 #include <r_cons.h>
-
-#if __linux__
-
 #include "../io_memory.h"
 #include <net/if.h>
 #include <sys/ioctl.h>
@@ -54,7 +54,7 @@ static int __read(RIO *io, RIODesc *desc, ut8 *buf, int count) {
 				memcpy (mal->buf + osz, mem, c);
 				io->coreb.cmdf (io->coreb.core, "f nread_%d %d %d",
 					sdat->count, c, mal->size);
-				io->coreb.cmdf (io->coreb.core, "omr 1 %d", mal->size);
+				// io->coreb.cmdf (io->coreb.core, "omr 1 %d", mal->size);
 				sdat->count++;
 			}
 			free (mem);
@@ -124,14 +124,19 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 		r_socket_block_time (data->sc, false, 0, 0);
 		free (host);
 	}
-	return r_io_desc_new (io, &r_io_plugin_isotp, pathname, R_PERM_RW | rw, mode, mal);
+	if (io->va) {
+		R_LOG_WARN ("This is a raw stream and growing io plugin, You may disable io.va to not depend on maps");
+	}
+	return r_io_desc_new (io, &r_io_plugin_isotp, pathname, R_PERM_RW | (rw & R_PERM_X), mode, mal);
 }
 
 RIOPlugin r_io_plugin_isotp = {
-	.name = "isotp",
-	.desc = "Connect using the ISOTP protocol (isotp://interface/srcid/dstid)",
+	.meta = {
+		.name = "isotp",
+		.desc = "Connect using the ISOTP protocol (isotp://interface/srcid/dstid)",
+		.license = "MIT",
+	},
 	.uris = ISOTPURI,
-	.license = "MIT",
 	.open = __open,
 	.close = __close,
 	.read = __read,
@@ -142,8 +147,11 @@ RIOPlugin r_io_plugin_isotp = {
 
 #else
 RIOPlugin r_io_plugin_isotp = {
-	.name = "isotp",
-	.desc = "shared memory resources (not for this platform)",
+	.meta = {
+		.name = "isotp",
+		.license = "MIT",
+		.desc = "shared memory resources (not for this platform)",
+	},
 };
 #endif
 

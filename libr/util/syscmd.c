@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2013-2022 - pancake */
+/* radare - LGPL - Copyright 2013-2023 - pancake */
 
 #include <r_core.h>
 #include <errno.h>
@@ -12,7 +12,7 @@
 R_TH_LOCAL RList *dirstack = NULL;
 
 static char *showfile(char *res, const int nth, const char *fpath, const char *name, int printfmt, bool needs_newline) {
-#if __UNIX__
+#if R2__UNIX__
 	struct stat sb;
 #endif
 	const char *n = fpath;
@@ -42,7 +42,7 @@ static char *showfile(char *res, const int nth, const char *fpath, const char *n
 	// TODO: escape non-printable chars in filenames
 	// TODO: Implement more real info in ls -l
 	// TODO: handle suid
-#if __UNIX__
+#if R2__UNIX__
 	if (lstat (n, &sb) != -1) {
 		ut32 ifmt = sb.st_mode & S_IFMT;
 		uid = sb.st_uid;
@@ -82,27 +82,52 @@ static char *showfile(char *res, const int nth, const char *fpath, const char *n
 		const char *eIMG = "🌅";
 		const char *eHID = "👀";
 		const char *eANY = "  ";
+		const char *eZIP = "🤐";
+		const char *eMOV = "📺";
+		const char *eEXE = "🏃";
+		const char *eLIB = "📚";
+		const char *eCOD = "📖";
 		// --
 		const char *icon = eANY;
 		if (isdir) {
 			icon = eDIR;
-#if __UNIX__
+		} else if (r_str_casestr (nn, ".mov") || r_str_casestr (nn, ".mp4") || r_str_casestr (nn, ".mpg")) {
+			icon = eMOV;
+		} else if (r_str_endswith (nn, ".py")) {
+			icon = "🐍";
+		} else if (r_str_endswith (nn, ".c")) {
+			icon = eCOD;
+		} else if (r_str_endswith (nn, ".o")) {
+			icon = "📕";
+		} else if (r_str_casestr (nn, ".exe")) {
+			icon = eEXE;
+		} else if (r_str_casestr (nn, ".apk") || r_str_casestr (nn, ".dmg")) {
+			icon = "📦";
+		} else if (r_str_casestr (nn, ".so") || r_str_casestr (nn, ".dll") || r_str_casestr (nn, ".dylib")) {
+			icon = eLIB;
+		} else if (r_str_casestr (nn, ".csv") || r_str_casestr (nn, ".txt") || r_str_casestr (nn, ".xml") || r_str_casestr (nn, ".json") || r_str_casestr (nn, ".pdf")) {
+			icon = "📄";
+		} else if (r_str_casestr (nn, ".zip") || r_str_casestr (nn, ".gz") || r_str_casestr (nn, ".xz") || r_str_casestr (nn, ".bz2") || r_str_casestr (nn, "jar")) {
+			icon = eZIP;
+		} else if (r_str_casestr (nn, ".jpg") || r_str_casestr (nn, ".png") || r_str_casestr (nn, ".gif") || r_str_casestr (nn, ".jpeg") || r_str_casestr (nn, ".svg")) {
+			icon = eIMG;
+#if R2__UNIX__
 		} else if ((sb.st_mode & S_IFMT) == S_IFLNK) {
 			const char *eLNK = "📎";
 			icon = eLNK;
 		} else if (sb.st_mode & S_ISUID) {
 			const char *eUID = "🔼";
 			icon = eUID;
+		} else if (perm & 1) {
+			icon = eEXE;
 #endif
-		} else if (r_str_casestr (nn, ".jpg") || r_str_casestr (nn, ".png") || r_str_casestr (nn, ".gif")) {
-			icon = eIMG;
 		} else if (*nn == '.') {
 			icon = eHID;
 		}
 		res = r_str_appendf (res, "%s %s\n", icon, nn);
 	} else if (printfmt == FMT_RAW) {
 		res = r_str_appendf (res, "%c%s%s%s  1 %4d:%-4d  %-10d  %s\n",
-			isdir?'d': fch,
+			isdir? 'd': fch,
 			r_str_get_fail (u_rwx, "-"),
 			r_str_rwx_i ((perm >> 3) & 7),
 			r_str_rwx_i (perm & 7),
@@ -127,7 +152,7 @@ static char *showfile(char *res, const int nth, const char *fpath, const char *n
 		res = r_str_append (res, js);
 		free (js);
 	} else {
-		eprintf ("unknown format\n");
+		R_LOG_ERROR ("unknown format");
 	}
 	free (nn);
 	free (u_rwx);
@@ -164,48 +189,41 @@ R_API char *r_syscmd_ls(const char *input, int cons_width) {
 		input++;
 	}
 	if (r_sandbox_enable (0)) {
-		eprintf ("Sandbox forbids listing directories\n");
+		R_LOG_ERROR ("Sandbox forbids listing directories");
 		return NULL;
 	}
-	if (*input && input[0] == ' ') {
-		input++;
-	}
+	input = r_str_trim_head_ro (input);
 	if (*input) {
-		if (!strncmp (input, "-h", 2) || *input == '?') {
+		if (r_str_startswith (input, "-h") || *input == '?') {
 			eprintf ("Usage: ls [-e,-l,-j,-q] [path] # long, json, quiet\n");
 			return NULL;
 		}
-		if ((!strncmp (input, "-e", 2))) {
+		if (r_str_startswith (input, "-e")) {
 			printfmt = FMT_EMOJI;
-			path = r_str_trim_head_ro (path + 1);
-		} else if ((!strncmp (input, "-q", 2))) {
+			path = r_str_trim_head_ro (input + 2);
+		} else if (r_str_startswith (input, "-q")) {
 			printfmt = FMT_QUIET;
-			path = r_str_trim_head_ro (path + 1);
-		} else if ((!strncmp (input, "-l", 2)) || (!strncmp (input, "-j", 2))) {
-			// mode = 'l';
-			if (input[2]) {
-				printfmt = (input[2] == 'j') ? FMT_JSON : FMT_RAW;
-				path = r_str_trim_head_ro (input + 2);
-				if (!*path) {
-					path = ".";
-				}
-			} else {
-				printfmt = FMT_RAW;
+			path = r_str_trim_head_ro (input + 2);
+		} else if (r_str_startswith (input, "-l") || r_str_startswith (input, "-j")) {
+			printfmt = (input[1] == 'j') ? FMT_JSON : FMT_RAW;
+			path = r_str_trim_head_ro (input + 2);
+			if (!*path) {
+				path = ".";
 			}
 		} else {
 			path = input;
 		}
 	}
-	if (!path || !*path) {
+	if (R_STR_ISEMPTY (path)) {
 		path = ".";
 	} else if (!strncmp (path, "~/", 2)) {
-		homepath = r_str_home (path + 2);
+		homepath = r_file_home (path + 2);
 		if (homepath) {
 			path = (const char *)homepath;
 		}
 	} else if (*path == '$') {
 		if (!strncmp (path + 1, "home", 4) || !strncmp (path + 1, "HOME", 4)) {
-			homepath = r_str_home ((strlen (path) > 5)? path + 6: NULL);
+			homepath = r_file_home ((strlen (path) > 5)? path + 6: NULL);
 			if (homepath) {
 				path = (const char *)homepath;
 			}
@@ -302,7 +320,6 @@ static ut64 valstr(const void *_a) {
 	return r_str_hash64 (a);
 }
 
-
 static int cmpstr(const void *_a, const void *_b) {
 	const char *a = _a, *b = _b;
 	return (int)strcmp (a, b);
@@ -323,7 +340,7 @@ R_API char *r_syscmd_sort(const char *file) {
 		r_str_trim (filename);
 		char *data = r_file_slurp (filename, NULL);
 		if (!data) {
-			eprintf ("No such file or directory\n");
+			R_LOG_ERROR ("No such file or directory");
 		} else {
 			list = r_str_split_list (data, "\n", 0);
 			r_list_sort (list, cmpstr);
@@ -352,7 +369,7 @@ R_API char *r_syscmd_head(const char *file, int count) {
 		r_str_trim (filename);
 		char *data = r_file_slurp_lines (filename, 1, count);
 		if (!data) {
-			eprintf ("No such file or directory\n");
+			R_LOG_ERROR ("No such file or directory");
 		}
 		free (filename);
 		return data;
@@ -376,7 +393,7 @@ R_API char *r_syscmd_tail(const char *file, int count) {
 		r_str_trim (filename);
 		char *data = r_file_slurp_lines_from_bottom (filename, count);
 		if (!data) {
-			eprintf ("No such file or directory\n");
+			R_LOG_ERROR ("No such file or directory");
 		}
 		free (filename);
 		return data;
@@ -401,7 +418,7 @@ R_API char *r_syscmd_uniq(const char *file) {
 		r_str_trim (filename);
 		char *data = r_file_slurp (filename, NULL);
 		if (!data) {
-			eprintf ("No such file or directory\n");
+			R_LOG_ERROR ("No such file or directory");
 		} else {
 			list = r_str_split_list (data, "\n", 0);
 			RList *uniq_list = r_list_uniq (list, valstr);
@@ -425,7 +442,7 @@ R_API char *r_syscmd_join(const char *file1, const char *file2) {
 	}
 	if (file1) {
 		if ((p1 = strchr (file1, ' '))) {
-			p1 = p1 + 1;
+			p1++;
 		} else {
 			p1 = file1;
 		}
@@ -437,7 +454,7 @@ R_API char *r_syscmd_join(const char *file1, const char *file2) {
 			p2 = file2;
 		}
 	}
-	if (p1 && *p1 && p2 && *p2 ) {
+	if (R_STR_ISNOTEMPTY (p1) && R_STR_ISNOTEMPTY (p2)) {
 		char *filename1 = strdup (p1);
 		char *filename2 = strdup (p2);
 		r_str_trim (filename1);
@@ -447,14 +464,14 @@ R_API char *r_syscmd_join(const char *file1, const char *file2) {
 		char *data = NULL;
 		RListIter *iter1, *iter2;
 		if (!data1 || !data2) {
-			eprintf ("No such files or directory\n");
+			R_LOG_ERROR ("No such files or directory");
 		} else {
 			list1 = r_str_split_list (data1, "\n",  0);
 			list2 = r_str_split_list (data2, "\n", 0);
 
 			char *str1, *str2;
 			r_list_foreach (list1, iter1, str1) {
-				char *field = strdup (str1);			// extract comman field
+				char *field = strdup (str1); // extract comman field
 				char *end = strchr (field, ' ');
 				if (end) {
 					*end = '\0';
@@ -504,7 +521,7 @@ R_API char *r_syscmd_cat(const char *file) {
 		r_str_trim (filename);
 		char *data = r_file_slurp (filename, NULL);
 		if (!data) {
-			eprintf ("No such file or directory\n");
+			R_LOG_ERROR ("No such file or directory");
 		}
 		free (filename);
 		return data;
@@ -544,7 +561,7 @@ R_API char *r_syscmd_mktemp(const char *dir) {
 		ret = r_sys_mkdirp (arg);
 	}
 	if (!ret) {
-		eprintf ("Cannot create '%s'\n", dirname);
+		R_LOG_ERROR ("Cannot create '%s'", dirname);
 		free (dirname);
 		return NULL;
 	}
@@ -568,7 +585,7 @@ R_API bool r_syscmd_mkdir(const char *dir) {
 	}
 	if (!r_sys_mkdirp (dirname)) {
 		if (r_sys_mkdir_failed ()) {
-			eprintf ("Cannot create '%s'\n", dirname);
+			R_LOG_ERROR ("Cannot create '%s'", dirname);
 			free (dirname);
 			return false;
 		}
@@ -583,14 +600,14 @@ R_API bool r_syscmd_pushd(const char *input) {
 	}
 	char *cwd = r_sys_getdir ();
 	if (!cwd) {
-		eprintf ("Where am I?\n");
+		R_LOG_ERROR ("Where am I?");
 		return false;
 	}
 	bool suc = r_sys_chdir (input);
 	if (suc) {
 		r_list_push (dirstack, cwd);
 	} else {
-		eprintf ("Cannot chdir\n");
+		R_LOG_ERROR ("Cannot chdir");
 	}
 	return suc;
 }
@@ -608,7 +625,6 @@ R_API bool r_syscmd_popd(void) {
 	if (r_list_empty (dirstack)) {
 		r_list_free (dirstack);
 		dirstack = NULL;
-		return false;
 	}
 	return true;
 }
@@ -628,13 +644,13 @@ R_API bool r_syscmd_mv(const char *input) {
 		eprintf ("Usage: mv src dst\n");
 		return false;
 	}
-	char *inp = strdup (input + 2);
+	char *inp = r_str_trim_dup (input + 2);
 	char *arg = strchr (inp, ' ');
 	bool rc = false;
 	if (arg) {
 		*arg++ = 0;
 		if (!(rc = r_file_move (inp, arg))) {
-			eprintf ("Cannot move file\n");
+			R_LOG_ERROR ("Cannot move file");
 		}
 	} else {
 		eprintf ("Usage: mv src dst\n");

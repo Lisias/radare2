@@ -4,7 +4,7 @@ NAME=r_util
 CFLAGS+=-DR2_PLUGIN_INCORE -I$(TOP)/shlr
 PCLIBS=@LIBZIP@ @DL_LIBS@
 OBJS=mem.o unum.o str.o hex.o file.o range.o charset.o xdg.o rxml.o
-OBJS+=prof.o cache.o sys.o buf.o sys_w32.o ubase64.o base85.o base91.o
+OBJS+=prof.o sys.o buf.o sys_w32.o ubase64.o base85.o base91.o base36.o
 OBJS+=list.o chmod.o graph.o event.o alloc.o donut.o print_code.o
 OBJS+=regex/regcomp.o regex/regerror.o regex/regexec.o uleb128.o rstr.o
 OBJS+=sandbox.o calc.o thread.o thread_sem.o thread_lock.o thread_cond.o thread_chan.o
@@ -13,8 +13,9 @@ OBJS+=seven.o randomart.o zip.o debruijn.o log.o getopt.o table.o sys_sh.o
 OBJS+=utf8.o utf16.o utf32.o strbuf.o lib.o name.o spaces.o signal.o syscmd.o
 OBJS+=udiff.o bdiff.o stack.o queue.o tree.o idpool.o assert.o bplist.o
 OBJS+=punycode.o pkcs7.o x509.o asn1.o asn1_str.o json_parser.o json_indent.o skiplist.o
-OBJS+=pj.o rbtree.o intervaltree.o qrcode.o vector.o skyline.o str_constpool.o str_trim.o
+OBJS+=pj.o rbtree.o intervaltree.o qrcode.o vector.o str_constpool.o str_trim.o
 OBJS+=ascii_table.o protobuf.o graph_drawable.o axml.o sstext.o new_rbtree.o token.o
+OBJS+=rvc.o rvc_git.o rvc_rvc.o
 
 ifeq (${HAVE_GPERF},1)
 OBJS+=d/ascii.o
@@ -26,10 +27,12 @@ OBJS+=d/iso8859_1.o
 endif
 
 ifeq ($(USE_SYSLZ4),1)
-CFLAGS+=@LZ4_CFLAGS@
+CFLAGS+=${LZ4_CFLAGS}
 PCLIBS+=@LZ4_LDFLAGS@
+LDFLAGS+=${LZ4_LDFLAGS}
 else
-OBJS+=$(SHLR)/lz4/lz4.o
+CFLAGS+=-DUSE_SMALLZ4
+OBJS+=$(SHLR)/smallz4/smallz4cat.o
 endif
 
 OBJS+=big_gmp.o

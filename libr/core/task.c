@@ -167,7 +167,7 @@ R_API void r_core_task_join(RCoreTaskScheduler *scheduler, RCoreTask *current, i
 	} else {
 		TASK_SIGSET_T old_sigset;
 		tasks_lock_enter (scheduler, &old_sigset);
-		RList *tasks = r_list_clone (scheduler->tasks);
+		RList *tasks = r_list_clone (scheduler->tasks, NULL);
 		RListIter *iter;
 		RCoreTask *task;
 		r_list_foreach (tasks, iter, task) {
@@ -239,7 +239,7 @@ R_API RCoreTask *r_core_task_new(RCore *core, bool create_cons, const char *cmd,
 		if (!task->cons_context) {
 			goto hell;
 		}
-		task->cons_context->cmd_depth = core->max_cmd_depth;
+		core->cur_cmd_depth = core->max_cmd_depth;
 	}
 
 	task->id = core->tasks.task_id_next++;

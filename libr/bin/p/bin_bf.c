@@ -1,23 +1,18 @@
-/* radare - LGPL - Copyright 2013-2019 - pancake */
+/* radare - LGPL - Copyright 2013-2023 - pancake */
 
-#include <r_types.h>
-#include <r_util.h>
-#include <r_lib.h>
 #include <r_bin.h>
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	return true;
 }
 
 static void destroy(RBinFile *bf) {
-	r_buf_free (bf->o->bin_obj);
-}
-
-static ut64 baddr(RBinFile *bf) {
-	return 0;
+	RBuffer *buf = R_UNWRAP3 (bf, bo, bin_obj);
+	r_buf_free (buf);
 }
 
 static RList *strings(RBinFile *bf) {
+	// no strings here
 	return NULL;
 }
 
@@ -39,29 +34,11 @@ static RBinInfo *info(RBinFile *bf) {
 	ret->bits = 32; // 16?
 	ret->big_endian = 0;
 	ret->dbg_info = 0;
-	/* TODO: move this somewhere else */
-	eprintf ("f input 128 0x3000\n");
-	eprintf ("o malloc://128 0x3000\n");
-	eprintf ("f screen 80*25 0x4000\n");
-	eprintf ("o malloc://80*25 0x4000\n");
-	eprintf ("f stack 0x200 0x5000\n");
-	eprintf ("o malloc://0x200 0x5000\n");
-	eprintf ("f data 0x1000 0x6000\n");
-	eprintf ("o malloc://0x1000 0x6000\n");
-	eprintf ("ar\n"); // hack to init
-	eprintf ("ar brk=stack\n");
-	eprintf ("ar scr=screen\n");
-	eprintf ("ar kbd=input\n");
-	eprintf ("ar ptr=data\n");
-	eprintf ("\"e cmd.vprompt=pxa 32@stack;pxa 32@screen;pxa 32@data\"\n");
-	eprintf ("s 0\n");
-	eprintf ("e asm.bits=32\n");
-	eprintf ("dL bf\n");
 	return ret;
 }
 
 // TODO: test with all these programs http://brainfuck.org
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	r_return_val_if_fail (buf, false);
 
 	ut8 tmp[64] = {0};
@@ -81,7 +58,7 @@ static bool check_buffer(RBinFile *bf, RBuffer *buf) {
 		i = p - tmp;
 	}
 	for (; i < read_length; i++) {
-		switch (p[i]) {
+		switch (tmp[i]) {
 		case '+':
 		case '-':
 		case '>':
@@ -104,28 +81,26 @@ static bool check_buffer(RBinFile *bf, RBuffer *buf) {
 
 static RList *entries(RBinFile *bf) {
 	r_return_val_if_fail (bf, NULL);
-	RList *ret;
-	RBinAddr *ptr = NULL;
-
-	if (!(ret = r_list_newf (free))) {
-		return NULL;
+	RList *ret = r_list_newf (free);
+	if (ret) {
+		RBinAddr *ptr = R_NEW0 (RBinAddr);
+		if (ptr) {
+			ptr->paddr = ptr->vaddr = 0;
+			r_list_append (ret, ptr);
+		}
 	}
-	if (!(ptr = R_NEW0 (RBinAddr))) {
-		return ret;
-	}
-	ptr->paddr = ptr->vaddr = 0;
-	r_list_append (ret, ptr);
 	return ret;
 }
 
 RBinPlugin r_bin_plugin_bf = {
-	.name = "bf",
-	.desc = "brainfuck",
-	.license = "LGPL3",
-	.load_buffer = &load_buffer,
+	.meta = {
+		.name = "bf",
+		.desc = "brainfuck",
+		.license = "LGPL3",
+	},
+	.load = &load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
-	.baddr = &baddr,
+	.check = &check,
 	.entries = entries,
 	.strings = &strings,
 	.info = &info,

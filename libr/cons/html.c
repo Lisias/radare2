@@ -1,11 +1,11 @@
-/* radare - LGPL - Copyright 2009-2020 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2023 - pancake, nibble */
 
 #include <r_cons.h>
 
-static bool gethtmlrgb(const char *str, char *buf) {
+static bool gethtmlrgb(const char *str, char *buf, size_t buf_size) {
 	ut8 r = 0, g = 0, b = 0;
 	if (r_cons_rgb_parse (str, &r, &g, &b, 0)) {
-		sprintf (buf, "#%02x%02x%02x", r, g, b);
+		snprintf (buf, buf_size, "#%02x%02x%02x", r, g, b);
 		return true;
 	}
 	buf[0] = '\0';
@@ -32,10 +32,10 @@ static const char *gethtmlcolor(const char ptrch) {
 R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 	const char *str = ptr;
 	int esc = 0;
-	int len = 0;
 	bool inv = false;
 	char text_color[16] = {0};
 	char background_color[16] = {0};
+	bool has_bold = false;
 	bool has_set = false;
 	bool need_to_set = false;
 	bool need_to_clear = false;
@@ -68,6 +68,11 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				if (inv) {
 					r_strbuf_append (res, first_style? " style='": ";");
 					r_strbuf_append (res, "text-decoration:underline overline");
+					first_style = false;
+				}
+				if (has_bold) {
+					r_strbuf_append (res, first_style? " style='": ";");
+					r_strbuf_append (res, "font-weight:bold");
 					first_style = false;
 				}
 				r_strbuf_append (res, first_style? ">": "'>");
@@ -123,12 +128,16 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 			}
 			esc = 2;
 			continue;
-		} else if (esc == 2) {
+		}
+		if (esc == 2) {
 			// TODO: use dword comparison here
 			if (ptr[0] == '0' && ptr[1] == 'J') { // R_CONS_CLEAR_FROM_CURSOR_TO_END
 				ptr += 2;
 				esc = 0;
 				str = ptr;
+			} else if (ptr[0] == '1') {
+				// ignore bold
+				has_bold = true;
 			} else if (!memcmp (ptr, "2K", 2)) {
 				ptr += 2;
 				esc = 0;
@@ -143,9 +152,7 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 			} else if (IS_DIGIT (ptr[0]) && ptr[1] == ';' && IS_DIGIT (ptr[2])) {
 				char *m = strchr (ptr, 'm');
 				if (m) {
-					// char *s = r_str_ndup (ptr, m + 1 - ptr);
-					// eprintf ("ONE (%s)\n", s);
-					gethtmlrgb (ptr, background_color);
+					gethtmlrgb (ptr, background_color, sizeof (background_color));
 					need_to_set = true;
 					ptr = m;
 					str = ptr + 1;
@@ -154,9 +161,7 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 			} else if (IS_DIGIT (ptr[0]) && IS_DIGIT (ptr[1]) && ptr[2] == ';') {
 				char *m = strchr (ptr, 'm');
 				if (m) {
-					// char *s = r_str_ndup (ptr, m + 1 - ptr);
-					// eprintf ("TWO (%s)\n", s);
-					gethtmlrgb (ptr, text_color);
+					gethtmlrgb (ptr, text_color, sizeof (text_color));
 					need_to_set = true;
 					ptr = m;
 					str = ptr + 1;
@@ -164,14 +169,14 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				}
 			} else if (r_str_startswith (ptr, "48;5;") || r_str_startswith (ptr, "48;2;")) {
 				char *end = strchr (ptr, 'm');
-				gethtmlrgb (ptr, background_color);
+				gethtmlrgb (ptr, background_color, sizeof (background_color));
 				need_to_set = true;
 				ptr = end;
 				str = ptr + 1;
 				esc = 0;
 			} else if (r_str_startswith (ptr, "38;5;") || r_str_startswith (ptr, "38;2;")) {
 				char *end = strchr (ptr, 'm');
-				gethtmlrgb (ptr, text_color);
+				gethtmlrgb (ptr, text_color, sizeof (text_color));
 				need_to_set = true;
 				if (end) {
 					ptr = end;
@@ -193,7 +198,8 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				str = ptr;
 				continue;
 			} else if (ptr[0] == '0' && ptr[1] == 'm') {
-				str = (++ptr) + 1;
+				ptr++;
+				str = ptr + 1;
 				esc = 0;
 				inv = false;
 				text_color[0] = '\0';
@@ -210,7 +216,8 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				continue;
 				// reset invert color
 			} else if (ptr[0] == '7' && ptr[1] == 'm') {
-				str = (++ptr) + 1;
+				ptr++;
+				str = ptr + 1;
 				inv = true;
 				need_to_set = true;
 				esc = 0;
@@ -226,7 +233,7 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				str = ptr + 1;
 				esc = 0;
 				continue;
-			} else if (ptr[0] == '4' && ptr[2] == 'm') {
+			} else if ((ptr[0] == '4' || ptr[0] == '9') && ptr[2] == 'm') {
 				const char *htmlColor = gethtmlcolor (ptr[1]);
 				if (htmlColor) {
 					r_str_ncpy (background_color, htmlColor, sizeof (background_color));
@@ -238,7 +245,6 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 				continue;
 			}
 		}
-		len++;
 	}
 	r_strbuf_append_n (res, str, ptr - str);
 	if (has_set) {

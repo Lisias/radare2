@@ -1,12 +1,9 @@
-/* radare - LGPL - Copyright 2013-2019 - pancake */
+/* radare - LGPL - Copyright 2013-2023 - pancake */
 
-#include <r_types.h>
-#include <r_util.h>
-#include <r_lib.h>
 #include <r_bin.h>
 #include "../i/private.h"
 
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	r_return_val_if_fail (buf, false);
 
 	ut64 sz = r_buf_size (buf);
@@ -22,7 +19,7 @@ static bool check_buffer(RBinFile *bf, RBuffer *buf) {
 	const ut32 ep = sz - 0x10000 + 0xfff0; /* F000:FFF0 address */
 	/* hacky check to avoid detecting multidex or MZ bins as bios */
 	/* need better fix for this */
-	ut8 tmp[3];
+	ut8 tmp[3] = {0};
 	int r = r_buf_read_at (buf, 0, tmp, sizeof (tmp));
 	if (r <= 0 || !memcmp (tmp, "dex", 3) || !memcmp (tmp, "MZ", 2)) {
 		return false;
@@ -33,16 +30,16 @@ static bool check_buffer(RBinFile *bf, RBuffer *buf) {
 	return bep == 0xea || bep == 0xe9;
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
-	if (!check_buffer (bf, buf)) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
+	if (!check (bf, buf)) {
 		return false;
 	}
-	*bin_obj = r_buf_ref (buf);
+	bf->bo->bin_obj = r_buf_ref (buf);
 	return true;
 }
 
 static void destroy(RBinFile *bf) {
-	r_buf_free (bf->o->bin_obj);
+	r_buf_free (bf->bo->bin_obj);
 }
 
 static ut64 baddr(RBinFile *bf) {
@@ -55,30 +52,29 @@ static RList *strings(RBinFile *bf) {
 }
 
 static RBinInfo *info(RBinFile *bf) {
-	RBinInfo *ret = NULL;
-	if (!(ret = R_NEW0 (RBinInfo))) {
-		return NULL;
+	r_return_val_if_fail (bf, NULL);
+	RBinInfo *ret = R_NEW0 (RBinInfo);
+	if (ret) {
+		ret->file = bf->file? strdup (bf->file): NULL;
+		ret->type = strdup ("bios");
+		ret->bclass = strdup ("1.0");
+		ret->rclass = strdup ("bios");
+		ret->os = strdup ("any");
+		ret->subsystem = strdup ("unknown");
+		ret->machine = strdup ("pc");
+		ret->arch = strdup ("x86");
+		ret->has_va = 1;
+		ret->bits = 16;
+		ret->big_endian = 0;
+		ret->dbg_info = false;
 	}
-	ret->lang = NULL;
-	ret->file = bf->file? strdup (bf->file): NULL;
-	ret->type = strdup ("bios");
-	ret->bclass = strdup ("1.0");
-	ret->rclass = strdup ("bios");
-	ret->os = strdup ("any");
-	ret->subsystem = strdup ("unknown");
-	ret->machine = strdup ("pc");
-	ret->arch = strdup ("x86");
-	ret->has_va = 1;
-	ret->bits = 16;
-	ret->big_endian = 0;
-	ret->dbg_info = 0;
 	return ret;
 }
 
 static RList *sections(RBinFile *bf) {
 	RList *ret = NULL;
 	RBinSection *ptr = NULL;
-	RBuffer *obj = bf->o->bin_obj;
+	RBuffer *obj = bf->bo->bin_obj;
 
 	if (!(ret = r_list_newf ((RListFree) r_bin_section_free))) {
 		return NULL;
@@ -127,12 +123,14 @@ static RList *entries(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_bios = {
-	.name = "bios",
-	.desc = "BIOS bin plugin",
-	.license = "LGPL",
-	.load_buffer = &load_buffer,
+	.meta = {
+		.name = "bios",
+		.desc = "BIOS bin plugin",
+		.license = "LGPL",
+	},
+	.load = &load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.baddr = &baddr,
 	.entries = entries,
 	.sections = sections,

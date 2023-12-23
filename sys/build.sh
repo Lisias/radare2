@@ -47,11 +47,17 @@ for a in $* ; do
 	esac
 done
 
+ABSPREFIX=`realpath ${PREFIX} 2> /dev/null`
+[ -n "${ABSPREFIX}" ] && PREFIX="${ABSPREFIX}"
+
 if [ "${USE_CS4}" = 1 ]; then
 	CFGARG="${CFGARG} --with-capstone4"
 fi
+if [ "${USE_CSNEXT}" = 1 ]; then
+	CFGARG="${CFGARG} --with-capstone-next"
+fi
 
-if [ "${OSNAME}" = Linux ] && [ -n "${PREFIX}" ] && [ "${PREFIX}" != /usr ]; then
+if [ "${OSNAME}" = Linux -a -n "${PREFIX}" -a "${PREFIX}" != /usr ]; then
 	CFGARG="${CFGARG} --with-rpath"
 fi
 
@@ -92,7 +98,8 @@ ${MAKE} mrproper > /dev/null 2>&1
 unset R2DEPS
 pwd
 
-./configure ${CFGARG} --prefix="${PREFIX}" || exit 1
+echo ./configure ${CFGARG} --prefix="${PREFIX}"
+eval ./configure ${CFGARG} --prefix="${PREFIX}" || exit 1
 ${MAKE} -s -j${MAKE_JOBS} MAKE_JOBS=${MAKE_JOBS} || exit 1
 if [ "${OSNAME}" = Darwin ]; then
 	./sys/macos-cert.sh

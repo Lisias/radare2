@@ -2,6 +2,7 @@
 #define R2_ANAL_OP_H
 
 #include <r_reg.h>
+#include <r_arch.h>
 #include <r_anal/hint.h>
 
 #ifdef __cplusplus
@@ -27,33 +28,6 @@ typedef enum {
 	R_ANAL_STACK_RESET,
 	R_ANAL_STACK_ALIGN,
 } RAnalStackOp;
-typedef enum {
-	R_ANAL_ACC_UNKNOWN = 0,
-	R_ANAL_ACC_R = (1 << 0),
-	R_ANAL_ACC_W = (1 << 1),
-} RAnalValueAccess;
-
-typedef enum {
-	R_ANAL_VAL_REG,
-	R_ANAL_VAL_MEM,
-	R_ANAL_VAL_IMM,
-} RAnalValueType;
-
-// base + reg + regdelta * mul + delta
-typedef struct r_anal_value_t {
-	RAnalValueType type;
-	RAnalValueAccess access;
-	int absolute; // if true, unsigned cast is used
-	int memref; // is memory reference? which size? 1, 2 ,4, 8
-	ut64 base ; // numeric address
-	st64 delta; // numeric delta
-	st64 imm; // immediate value
-	int mul; // multiplier (reg*4+base)
-	// XXX can be invalidated if regprofile changes causing an UAF
-	RRegItem *seg; // segment selector register
-	RRegItem *reg; // register item reference
-	RRegItem *regdelta; // register index used
-} RAnalValue;
 
 typedef enum {
 	R_ANAL_OP_DIR_READ = 1,
@@ -66,14 +40,14 @@ typedef enum {
 	R_ANAL_OP_FAMILY_UNKNOWN = -1,
 	R_ANAL_OP_FAMILY_CPU = 0,	/* normal cpu instruction */
 	R_ANAL_OP_FAMILY_FPU,    	/* fpu (floating point) */
-	R_ANAL_OP_FAMILY_MMX,    	/* multimedia instruction (packed data) */
-	R_ANAL_OP_FAMILY_SSE,    	/* extended multimedia instruction (packed data) */
+	R_ANAL_OP_FAMILY_VEC,    	/* vector instruction (packed data) */
 	R_ANAL_OP_FAMILY_PRIV,   	/* privileged instruction */
 	R_ANAL_OP_FAMILY_CRYPTO, 	/* cryptographic instructions */
 	R_ANAL_OP_FAMILY_THREAD, 	/* thread/lock/sync instructions */
 	R_ANAL_OP_FAMILY_VIRT,   	/* virtualization instructions */
 	R_ANAL_OP_FAMILY_SECURITY,	/* security instructions */
 	R_ANAL_OP_FAMILY_IO,     	/* IO instructions (i.e. IN/OUT) */
+	R_ANAL_OP_FAMILY_SIMD,   	/* SIMD instructions */
 	R_ANAL_OP_FAMILY_LAST
 } RAnalOpFamily;
 
@@ -99,19 +73,27 @@ On x86 according to Wikipedia
 	0x67: Address-size override prefix
 #endif
 
-// XXX: this definition is plain wrong. use enum or empower bits
 #define R_ANAL_OP_TYPE_MASK 0x8000ffff
+#define R_ANAL_OP_MOD_MASK 0x8000ffff
 #define R_ANAL_OP_HINT_MASK 0xf0000000
+
 typedef enum {
-	R_ANAL_OP_TYPE_COND  = 0x80000000, // TODO must be moved to prefix?
-	//TODO: MOVE TO PREFIX .. it is used by anal_java.. must be updated
+	// R2_590 - DEPRECATE
+	R_ANAL_OP_TYPE_COND  = 0x80000000, // TODO must be moved to prefix? // should not be TYPE those are modifiers!
 	R_ANAL_OP_TYPE_REP   = 0x40000000, /* repeats next instruction N times */
 	R_ANAL_OP_TYPE_MEM   = 0x20000000, // TODO must be moved to prefix?
 	R_ANAL_OP_TYPE_REG   = 0x10000000, // operand is a register
 	R_ANAL_OP_TYPE_IND   = 0x08000000, // operand is indirect
-	R_ANAL_OP_TYPE_NULL  = 0,
-	R_ANAL_OP_TYPE_JMP   = 1,  /* mandatory jump */
-	R_ANAL_OP_TYPE_UJMP  = 2,  /* unknown jump (register or so) */
+	R_ANAL_OP_TYPE_NULL  = 0,  // this is like unknown, but acts like a nop. aka undefined type. rename?
+#if 1
+	R_ARCH_OP_MOD_COND  = 0x80000000, // conditional instruction
+	R_ARCH_OP_MOD_REP   = 0x40000000, // repeats instruction N times
+	R_ARCH_OP_MOD_MEM   = 0x20000000, // requires memory access
+	R_ARCH_OP_MOD_REG   = 0x10000000, // operand is a register
+	R_ARCH_OP_MOD_IND   = 0x08000000, // operand is indirect
+#endif
+	R_ANAL_OP_TYPE_JMP   = 1, /* mandatory jump */
+	R_ANAL_OP_TYPE_UJMP  = 2, /* unknown jump (register or so) */
 	R_ANAL_OP_TYPE_RJMP  = R_ANAL_OP_TYPE_UJMP| R_ANAL_OP_TYPE_REG,
 	R_ANAL_OP_TYPE_UCJMP = R_ANAL_OP_TYPE_UJMP | R_ANAL_OP_TYPE_COND, /* conditional unknown jump */
 	R_ANAL_OP_TYPE_IJMP  = R_ANAL_OP_TYPE_UJMP | R_ANAL_OP_TYPE_IND,
@@ -120,7 +102,7 @@ typedef enum {
 	R_ANAL_OP_TYPE_MJMP  = R_ANAL_OP_TYPE_JMP | R_ANAL_OP_TYPE_MEM,   /* memory jump */
 	R_ANAL_OP_TYPE_RCJMP = R_ANAL_OP_TYPE_CJMP | R_ANAL_OP_TYPE_REG,  /* conditional jump register */
 	R_ANAL_OP_TYPE_MCJMP = R_ANAL_OP_TYPE_CJMP | R_ANAL_OP_TYPE_MEM,  /* memory conditional jump */
-	R_ANAL_OP_TYPE_CALL  = 3,  /* call to subroutine (branch+link) */
+	R_ANAL_OP_TYPE_CALL  = 3, /* call to subroutine (branch+link) */
 	R_ANAL_OP_TYPE_UCALL = 4, /* unknown call (register or so) */
 	R_ANAL_OP_TYPE_RCALL = R_ANAL_OP_TYPE_UCALL | R_ANAL_OP_TYPE_REG,
 	R_ANAL_OP_TYPE_ICALL = R_ANAL_OP_TYPE_UCALL | R_ANAL_OP_TYPE_IND,
@@ -129,20 +111,20 @@ typedef enum {
 	R_ANAL_OP_TYPE_UCCALL= R_ANAL_OP_TYPE_UCALL | R_ANAL_OP_TYPE_COND, /* conditional unknown call */
 	R_ANAL_OP_TYPE_RET   = 5, /* returns from subroutine */
 	R_ANAL_OP_TYPE_CRET  = R_ANAL_OP_TYPE_COND | R_ANAL_OP_TYPE_RET, /* conditional return from subroutine */
-	R_ANAL_OP_TYPE_ILL   = 6,  /* illegal instruction // trap */
+	R_ANAL_OP_TYPE_ILL   = 6, /* illegal instruction // trap */
 	R_ANAL_OP_TYPE_UNK   = 7, /* unknown opcode type */
 	R_ANAL_OP_TYPE_NOP   = 8, /* does nothing */
 	R_ANAL_OP_TYPE_MOV   = 9, /* register move */
 	R_ANAL_OP_TYPE_CMOV  = 9 | R_ANAL_OP_TYPE_COND, /* conditional move */
 	R_ANAL_OP_TYPE_TRAP  = 10, /* it's a trap! */
-	R_ANAL_OP_TYPE_SWI   = 11,  /* syscall, software interrupt */
+	R_ANAL_OP_TYPE_SWI   = 11, /* syscall, software interrupt */
 	R_ANAL_OP_TYPE_CSWI  = 11 | R_ANAL_OP_TYPE_COND,  /* syscall, software interrupt */
 	R_ANAL_OP_TYPE_UPUSH = 12, /* unknown push of data into stack */
 	R_ANAL_OP_TYPE_RPUSH = R_ANAL_OP_TYPE_UPUSH | R_ANAL_OP_TYPE_REG, /* push register */
-	R_ANAL_OP_TYPE_PUSH  = 13,  /* push value into stack */
-	R_ANAL_OP_TYPE_POP   = 14,   /* pop value from stack to register */
-	R_ANAL_OP_TYPE_CMP   = 15,  /* compare something */
-	R_ANAL_OP_TYPE_ACMP  = 16,  /* compare via and */
+	R_ANAL_OP_TYPE_PUSH  = 13, /* push value into stack */
+	R_ANAL_OP_TYPE_POP   = 14, /* pop value from stack to register */
+	R_ANAL_OP_TYPE_CMP   = 15, /* compare something */
+	R_ANAL_OP_TYPE_ACMP  = 16, /* compare via and */
 	R_ANAL_OP_TYPE_ADD   = 17,
 	R_ANAL_OP_TYPE_SUB   = 18,
 	R_ANAL_OP_TYPE_IO    = 19,
@@ -157,9 +139,10 @@ typedef enum {
 	R_ANAL_OP_TYPE_XOR   = 28,
 	R_ANAL_OP_TYPE_NOR   = 29,
 	R_ANAL_OP_TYPE_NOT   = 30,
-	R_ANAL_OP_TYPE_STORE = 31,  /* store from register to memory */
-	R_ANAL_OP_TYPE_LOAD  = 32,  /* load from memory to register */
-	R_ANAL_OP_TYPE_LEA   = 33, /* TODO add ulea */
+	R_ANAL_OP_TYPE_STORE = 31, /* store from register to memory */
+	R_ANAL_OP_TYPE_LOAD  = 32, /* load from memory to register */
+	R_ANAL_OP_TYPE_LEA   = 33, /* like mov, but using memory addresspace */
+	R_ANAL_OP_TYPE_ULEA  = 33 | R_ARCH_OP_MOD_REG, // destination cant be computed without emulation
 	R_ANAL_OP_TYPE_LEAVE = 34,
 	R_ANAL_OP_TYPE_ROR   = 35,
 	R_ANAL_OP_TYPE_ROL   = 36,
@@ -171,14 +154,10 @@ typedef enum {
 	R_ANAL_OP_TYPE_CAST = 42,
 	R_ANAL_OP_TYPE_NEW = 43,
 	R_ANAL_OP_TYPE_ABS = 44,
-	R_ANAL_OP_TYPE_CPL = 45,	/* complement */
+	R_ANAL_OP_TYPE_CPL = 45, /* complement */
 	R_ANAL_OP_TYPE_CRYPTO = 46,
 	R_ANAL_OP_TYPE_SYNC = 47,
-	//R_ANAL_OP_TYPE_DEBUG = 43, // monitor/trace/breakpoint
-#if 0
-	R_ANAL_OP_TYPE_PRIV = 40, /* privileged instruction */
-	R_ANAL_OP_TYPE_FPU = 41, /* floating point stuff */
-#endif
+	R_ANAL_OP_TYPE_DEBUG = 48, // monitor/trace/breakpoint
 } _RAnalOpType;
 
 
@@ -251,9 +230,12 @@ typedef struct r_anal_op_t {
 	ut32 type;	/* type of opcode */
 	RAnalOpPrefix prefix;	/* type of opcode prefix (rep,lock,..) */
 	ut32 type2;	/* used by java */
-	RAnalStackOp stackop;	/* operation on stack? */
-	_RAnalCond cond;	/* condition type */
+	RAnalStackOp stackop; /* operation on stack? */
+	_RAnalCond cond; /* condition type */
+	bool weakbytes;
+	ut8 *bytes;     /* can be null, but is used for encoding and decoding, malloc of `size` */
 	int size;       /* size in bytes of opcode */
+	bool tlocal;    // uses the thread local storage
 	int nopcode;    /* number of bytes representing the opcode (not the arguments) TODO: find better name */
 	int cycles;	/* cpu-cycles taken by instruction */
 	int failcycles;	/* conditional cpu-cycles */
@@ -271,20 +253,51 @@ typedef struct r_anal_op_t {
 	int ptrsize;    /* f.ex: zero extends for 8, 16 or 32 bits only */
 	st64 stackptr;  /* stack pointer */
 	int refptr;     /* if (0) ptr = "reference" else ptr = "load memory of refptr bytes" */
-	RVector/*RAnalValue*/ srcs;
-	RVector/*RAnalValue*/ dsts;
-	RList *access; /* RAnalValue access information */
+	RVector/*RArchValue*/ srcs;
+	RVector/*RArchValue*/ dsts;
+	RList *access; /* RArchValue access information */
 	RStrBuf esil;
 	RStrBuf opex;
-	const char *reg; /* destination register */
-	const char *ireg; /* register used for indirect memory computation*/
+	const char *reg; /* destination register rename to dreg or dst_reg */
+	const char *ireg; /* register used for indirect memory computation . TODO rename to ind_reg */
 	int scale;
-	ut64 disp;
+	ut64 disp; // displace, used as offset to be added from a register base
 	RAnalSwitchOp *switch_op;
 	RAnalHint hint;
 	RAnalDataType datatype;
 	int vliw; // begin of opcode block.
+	int payload; // used for instructions like dalvik's switch-payload
 } RAnalOp;
+
+R_API RAnalOp *r_anal_op_clone(RAnalOp *op);
+R_API void r_anal_op_free(void *_op);
+R_API bool r_anal_op_nonlinear(int t);
+R_API void r_anal_op_init(RAnalOp *op);
+R_API bool r_anal_op_set_bytes(RAnalOp *op, ut64 addr, const ut8* data, int size);
+R_API bool r_anal_op_set_mnemonic(RAnalOp *op, ut64 addr, const char *s);
+R_API const char *r_anal_op_direction_tostring(RAnalOp *op);
+R_API bool r_anal_op_ismemref(int t);
+R_API const char *r_anal_optype_tostring(int t);
+R_API const char *r_anal_optype_index(int idx);
+R_API int r_anal_optype_from_string(const char *type);
+R_API const char *r_anal_op_family_tostring(int n);
+R_API int r_anal_op_family_from_string(const char *f);
+R_API int r_anal_op_hint(RAnalOp *op, RAnalHint *hint);
+
+/* switch.c APIs */
+R_API RAnalSwitchOp *r_anal_switch_op_new(ut64 addr, ut64 min_val, ut64 max_val, ut64 def_val);
+R_API void r_anal_switch_op_free(RAnalSwitchOp *swop);
+R_API RAnalCaseOp* r_anal_switch_op_add_case(RAnalSwitchOp *swop, ut64 addr, ut64 value, ut64 jump);
+
+// value.c
+R_API RArchValue *r_anal_value_new(void);
+R_API void r_anal_value_free(RArchValue *value);
+R_API RArchValue *r_anal_value_clone(RArchValue *ov);
+R_API RArchValue *r_anal_value_new_from_string(const char *str);
+R_API st64 r_anal_value_eval(RArchValue *value);
+R_API char *r_anal_value_tostring(RArchValue *value);
+R_API const char *r_anal_value_type_tostring(RArchValue *value);
+R_API void r_anal_value_free(RArchValue *value);
 
 #ifdef __cplusplus
 }

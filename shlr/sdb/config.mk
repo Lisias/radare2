@@ -6,7 +6,7 @@ INCDIR=${PREFIX}/include
 VAPIDIR=${DATADIR}/vala/vapi/
 MANDIR=${DATADIR}/man/man1
 
-SDBVER=1.9.2
+SDBVER=1.9.8
 
 BUILD_MEMCACHE=0
 
@@ -28,10 +28,18 @@ INSTALL_MAN=$(INSTALL) -m 444
 INSTALL_LIB=$(INSTALL) -c
 endif
 
-# link time optimization
-#CFLAGS_STD=-std=gnu99 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L -flto -O2
+OS=$(shell uname)
+OSTYPE?=$(shell uname -s)
+ARCH?=$(shell uname -m)
 
-CFLAGS_STD=-std=gnu99 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L
+# link time optimization
+#CFLAGS_STD=-std=gnu99 -flto -O2
+
+CFLAGS_STD=-std=gnu99
+ifeq (,$(findstring AIX,${OSTYPE}))
+CFLAGS_STD+=-D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L
+endif
+
 #CFLAGS+=-Wno-initializer-overrides
 CFLAGS:=${CFLAGS_STD} $(CFLAGS)
 
@@ -45,7 +53,7 @@ CFLAGS+=-Wsign-compare
 # some old gcc doesnt support this
 # CFLAGS+=-Wmissing-field-initializers
 #CFLAGS+=-O3
-CFLAGS+=-g -Wall -O0
+# CFLAGS+=-g -Wall -O0
 #CFLAGS+=-g
 #LDFLAGS+=-g -flto
 
@@ -53,9 +61,6 @@ HAVE_VALA=#$(shell valac --version 2> /dev/null)
 # This is hacky
 HOST_CC?=gcc
 RANLIB?=ranlib
-OS=$(shell uname)
-OSTYPE?=$(shell uname -s)
-ARCH?=$(shell uname -m)
 
 AR?=ar
 CC?=gcc

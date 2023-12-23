@@ -5,19 +5,6 @@
 
 #include <r_util.h>
 
-#if __i386__
-#define R2R_ARCH "x86"
-#elif __x86_64__
-#define R2R_ARCH "x64"
-#elif __arm64__ || __aarch64__
-#define R2R_ARCH "arm64"
-#elif __arm__
-#define R2R_ARCH "arm"
-#elif __mips__
-#define R2R_ARCH "mips"
-#else
-#define R2R_ARCH "unknown"
-#endif
 #define R2R_ARCH_OS R_SYS_OS "-"R_SYS_ARCH
 
 typedef struct r2r_cmd_test_string_record {
@@ -45,10 +32,12 @@ typedef struct r2r_cmd_test_t {
 	R2RCmdTestStringRecord require;
 	R2RCmdTestStringRecord source;
 	R2RCmdTestStringRecord cmds;
+	R2RCmdTestNumRecord repeat;
 	R2RCmdTestStringRecord expect;
 	R2RCmdTestStringRecord expect_err;
 	R2RCmdTestStringRecord regexp_out;
 	R2RCmdTestStringRecord regexp_err;
+	R2RCmdTestStringRecord env;
 	R2RCmdTestBoolRecord broken;
 	R2RCmdTestNumRecord timeout;
 	ut64 run_line;
@@ -61,6 +50,7 @@ typedef struct r2r_cmd_test_t {
 	macro_str ("FILE", file) \
 	macro_str ("ARGS", args) \
 	macro_str ("REQUIRE", require) \
+	macro_int ("REPEAT", repeat) \
 	macro_int ("TIMEOUT", timeout) \
 	macro_str ("SOURCE", source) \
 	macro_str ("CMDS", cmds) \
@@ -68,6 +58,7 @@ typedef struct r2r_cmd_test_t {
 	macro_str ("EXPECT_ERR", expect_err) \
 	macro_str ("REGEXP_OUT", regexp_out) \
 	macro_str ("REGEXP_ERR", regexp_err) \
+	macro_str ("ENV", env) \
 	macro_bool ("BROKEN", broken)
 
 typedef enum r2r_asm_test_mode_t {

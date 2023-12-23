@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2017 - condret, pancake */
+/* radare - LGPL - Copyright 2017-2023 - condret, pancake */
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -9,11 +9,10 @@ typedef struct {
 } RIONull;
 
 static int __write(RIO* io, RIODesc* fd, const ut8* buf, int count) {
-	RIONull* null;
 	if (!fd || !fd->data || !buf) {
 		return -1;
 	}
-	null = (RIONull*) fd->data;
+	RIONull* null = (RIONull*) fd->data;
 	if ((null->offset + count) > null->size) {
 		int ret = null->size - null->offset;
 		return ret;
@@ -27,11 +26,12 @@ static bool __resize(RIO* io, RIODesc* fd, ut64 count) {
 		RIONull* null = (RIONull*) fd->data;
 		null->size = count;
 		if (null->offset >= count) {
-			if (count) {
-				null->offset = count - 1;
-			} else {
-				null->offset = 0LL;
-			}
+			null->offset = (count != 0)? count - 1: 0LL;
+		}
+		char *uri = r_str_newf ("null://%"PFMT64u, count);
+		if (uri) {
+			free (fd->uri);
+			fd->uri = uri;
 		}
 		return true;
 	}
@@ -39,11 +39,10 @@ static bool __resize(RIO* io, RIODesc* fd, ut64 count) {
 }
 
 static int __read(RIO* io, RIODesc* fd, ut8* buf, int count) {
-	RIONull* null;
 	if (!fd || !fd->data || !buf) {
 		return -1;
 	}
-	null = (RIONull*) fd->data;
+	RIONull* null = (RIONull*) fd->data;
 	if ((null->offset + count) > null->size) {
 		int ret = null->size - null->offset;
 		memset (buf, 0x00, ret);
@@ -94,7 +93,7 @@ static RIODesc* __open(RIO* io, const char* pathname, int rw, int mode) {
 			if (null) {
 				null->size = r_num_math (NULL, pathname + 7) + 1;
 				null->offset = 0LL;
-				return r_io_desc_new (io, &r_io_plugin_null, pathname, rw, mode, null);
+				return r_io_desc_new (io, &r_io_plugin_null, pathname, rw & R_PERM_RWX, mode, null);
 			}
 		}
 	}
@@ -102,9 +101,11 @@ static RIODesc* __open(RIO* io, const char* pathname, int rw, int mode) {
 }
 
 RIOPlugin r_io_plugin_null = {
-	.name = "null",
-	.desc = "Null plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "null",
+		.desc = "Null plugin",
+		.license = "LGPL3",
+	},
 	.uris = "null://",
 	.open = __open,
 	.close = __close,

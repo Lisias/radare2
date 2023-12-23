@@ -1,3 +1,35 @@
+NAME=/re in calls
+FILE=bins/mach0/ls-m1
+ARGS=-a arm -b 64
+CMDS=<<EOF
+s 0x1000071e8
+/re $$
+pd 1
+EOF
+EXPECT=<<EOF
+            ;-- func.1000071e8:
+            ; CALL XREFS from main @ +0x4c(x), +0x668(x)
+            0x1000071e8      7f2303d5       pacibsp
+EOF
+RUN
+
+NAME=/r in calls
+FILE=bins/mach0/ls-m1
+ARGS=-a arm -b 64
+CMDS=<<EOF
+s 0x1000071e8
+/r $$
+pd 1
+EOF
+EXPECT=<<EOF
+(nofunc) 0x100003adc [CALL] bl sym.func.1000071e8
+(nofunc) 0x1000040f8 [CALL] bl sym.func.1000071e8
+            ;-- func.1000071e8:
+            ; CALL XREFS from main @ +0x4c(x), +0x668(x)
+            0x1000071e8      7f2303d5       pacibsp
+EOF
+RUN
+
 NAME=ldr x25, [sp, 0x28]
 FILE=malloc://0x200
 CMDS=<<EOF
@@ -13,6 +45,56 @@ ar x25
 EOF
 EXPECT=<<EOF
 0x1122334455667788
+EOF
+RUN
+
+NAME=store q0 128bit reg
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+e hex.header=false
+woe 1
+x 16
+ae 0,[16],q0,=
+ar q0
+?e --
+wow 00
+x 16
+ae q0,0,=[16]
+x 16
+EOF
+EXPECT=<<EOF
+0x00000000  0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................
+0x0f0e0d0c0b0a09080706050403020100
+--
+0x00000000  0000 0000 0000 0000 0000 0000 0000 0000  ................
+0x00000000  0001 0203 0405 0607 0809 0a0b 0c0d 0e0f  ................
+EOF
+RUN
+
+
+NAME=ldr q0 128bit reg
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+ar q0
+ar q0=123
+ar q0
+ar0
+ar q0
+?e --
+woe 1
+ae 0,[16],q0,=
+ar q0
+EOF
+EXPECT=<<EOF
+0x00000000000000000000000000000000
+0x0000000000000000000000000000007b
+0x00000000000000000000000000000000
+--
+0x0f0e0d0c0b0a09080706050403020100
 EOF
 RUN
 
@@ -486,9 +568,128 @@ EXPECT=<<EOF
 EOF
 RUN
 
+NAME=tst x10, 7 with x10=1
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+wx 5f0940f2
+ar x10=1
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:0 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 7 with x10=8
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+wx 5f0940f2
+ar x10=8
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:1 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 0xf000000000000000 with x10=0x7000000000000000
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+wx 5f0d44f2
+ar x10=0x7000000000000000
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:0 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 0xf000000000000000 with x10=0x8000000000000000
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+wx 5f0d44f2
+ar x10=0x8000000000000000
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:1 z:0 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 7 with x10=1 (arm.v35)
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm.v35
+e asm.bits=64
+wx 5f0940f2
+ar x10=1
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:0 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 7 with x10=8 (arm.v35)
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm.v35
+e asm.bits=64
+wx 5f0940f2
+ar x10=8
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:1 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 0xf000000000000000 with x10=0x7000000000000000 (arm.v35)
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm.v35
+e asm.bits=64
+wx 5f0d44f2
+ar x10=0x7000000000000000
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:0 z:0 c:0 o:0 p:0
+EOF
+RUN
+
+NAME=tst x10, 0xf000000000000000 with x10=0x8000000000000000 (arm.v35)
+FILE=malloc://0x200
+CMDS=<<EOF
+e asm.arch=arm.v35
+e asm.bits=64
+wx 5f0d44f2
+ar x10=0x8000000000000000
+aes
+arcq
+EOF
+EXPECT=<<EOF
+s:1 z:0 c:0 o:0 p:0
+EOF
+RUN
+
 NAME=subs x0, x0, x1; csel x0, x2, x3, mi
 FILE=malloc://0x200
-BROKEN=1
 CMDS=<<EOF
 e asm.arch=arm
 e asm.bits=64

@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2019 - pancake */
+/* radare - LGPL - Copyright 2011-2023 - pancake */
 
 #include <r_core.h>
 
@@ -8,9 +8,7 @@ R_API bool r_core_patch_line(RCore *core, char *str) {
 		return false;
 	}
 	*p = 0;
-	for (++p; *p == ' '; p++) {
-		; // XXX: skipsspaces here
-	}
+	p = (char *)r_str_trim_head_ro (p + 1);
 
 	switch (*p) {
 	case '"':
@@ -18,29 +16,27 @@ R_API bool r_core_patch_line(RCore *core, char *str) {
 		if (q) {
 			*q = 0;
 		}
-		r_core_cmdf (core, "s %s", str);
-		r_core_cmdf (core, "\"w %s\"", p+1);
+		r_core_cmdf (core, "\"\"s %s", str);
+		r_core_cmdf (core, "\"\"w %s", p+1);
 		break;
 	case ':':
-		r_core_cmdf (core, "s %s", str);
-		r_core_cmdf (core, "\"wa %s\"", p);
+		r_core_cmdf (core, "\"\"s %s", str);
+		r_core_cmdf (core, "\"\"wa %s", p);
 		break;
 	case 'v':
-		q = strchr (p + 1,' ');
+		q = strchr (p + 1, ' ');
 		if (q) {
 			*q = 0;
-			for (++q; *q == ' '; q++) {
-				; // XXX: skipsspaces here
-			}
+			q = (char *)r_str_trim_head_ro (q + 1);
 		} else {
 			return 0;
 		}
-		r_core_cmdf (core, "s %s", str);
-		r_core_cmdf (core, "wv%s %s", p + 1, q);
+		r_core_cmdf (core, "\"\"s %s", str);
+		r_core_cmdf (core, "\"\"wv%s %s", p + 1, q);
 		break;
 	default:
-		r_core_cmdf (core, "s %s", str);
-		r_core_cmdf (core, "wx %s", p);
+		r_core_cmdf (core, "\"\"s %s", str);
+		r_core_cmdf (core, "\"\"wx %s", p);
 		break;
 	}
 	return true;
@@ -69,10 +65,10 @@ static bool __core_patch_bracket(RCore *core, const char *str, ut64 *noff) {
 			break;
 		}
 		if ((q = strstr (str, "${"))) {
-			char *end = strchr (q+2,'}');
+			char *end = strchr (q + 2,'}');
 			if (end) {
 				*q = *end = 0;
-				*noff = r_num_math (core->num, q+2);
+				*noff = r_num_math (core->num, q + 2);
 				r_buf_append_bytes (b, (const ut8*)str, strlen (str));
 				snprintf (tmp, sizeof (tmp), "0x%08"PFMT64x, *noff);
 				r_buf_append_bytes (b, (const ut8*)tmp, strlen (tmp));
@@ -84,7 +80,7 @@ static bool __core_patch_bracket(RCore *core, const char *str, ut64 *noff) {
 		str = p;
 	}
 
-	s = r_buf_to_string (b);
+	s = r_buf_tostring (b);
 	r_egg_load (core->egg, s, 0);
 	free (s);
 

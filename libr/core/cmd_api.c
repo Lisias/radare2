@@ -2,7 +2,7 @@
 
 #define R_LOG_ORIGIN "cmdapi"
 #include <r_core.h>
-#include "ht_pp.h"
+#include <sdb/ht_pp.h>
 
 #define NCMDS (sizeof (cmd->cmds) / sizeof (*cmd->cmds))
 
@@ -494,11 +494,12 @@ R_API int r_cmd_call(RCmd *cmd, const char *input) {
 		RCmdAliasVal *v = r_cmd_alias_get (cmd, input);
 		if (v && v->is_data) {
 			char *v_str = r_cmd_alias_val_strdup (v);
-			r_cons_strcat (v_str);
+			r_cons_print (v_str);
 			free (v_str);
 			return true;
 		}
 		r_list_foreach (cmd->plist, iter, cp) {
+			/// XXX the plugin call have no plugin context!! we cant have multiple plugins here
 			if (cp->call && cp->call (cmd->data, input)) {
 				free (nstr);
 				return true;
@@ -586,14 +587,14 @@ R_API bool r_cmd_macro_add(RCmdMacro *mac, const char *oname) {
 
 	pbody = strchr (name, ';');
 	if (!pbody) {
-		R_LOG_ERROR ("Invalid macro body");
+		R_LOG_ERROR ("Invalid macro body in '%s'", name);
 		free (name);
 		return false;
 	}
 	*pbody = '\0';
 	pbody++;
 
-	if (*name && name[1] && name[strlen (name)-1]==')') {
+	if (*name && name[1] && name[strlen (name) - 1] == ')') {
 		R_LOG_ERROR ("missing macro body?");
 		free (name);
 		return false;
@@ -701,17 +702,35 @@ static void macro_meta(RCmdMacro *mac) {
 }
 // TODO: use mac->cb_printf which is r_cons_printf at the end
 R_API void r_cmd_macro_list(RCmdMacro *mac, int mode) {
+	RCmdMacroItem *m;
+	int j, idx = 0;
+	RListIter *iter;
 	if (mode == '*') {
 		macro_meta (mac);
 		return;
 	}
 	if (mode == 'j') {
-		R_LOG_ERROR ("TODO: JSON output for macros");
+		PJ *pj = pj_new ();
+		pj_o (pj);
+		pj_ks (pj, "cmd", "(j");
+		pj_ka (pj, "macros");
+		r_list_foreach (mac->macros, iter, m) {
+			pj_o (pj);
+			pj_ks (pj, "name", m->name);
+			pj_ks (pj, "args", m->args);
+			pj_ks (pj, "cmds", r_str_trim_head_ro (m->code));
+			pj_end (pj);
+			idx++;
+		}
+
+		pj_end (pj);
+		pj_end (pj);
+
+		char *s = pj_drain (pj);
+		mac->cb_printf ("%s\n", s);
+		free (s);
 		return;
 	}
-	RCmdMacroItem *m;
-	int j, idx = 0;
-	RListIter *iter;
 	r_list_foreach (mac->macros, iter, m) {
 		mac->cb_printf ("%d (%s %s; ", idx, m->name, m->args);
 		for (j = 0; m->code[j]; j++) {
@@ -746,7 +765,7 @@ R_API int r_cmd_macro_cmd_args(RCmdMacro *mac, const char *ptr, const char *args
 	const char *arg = args;
 
 	for (*cmd = i = j = 0; j < R_CMD_MAXLEN && ptr[j]; i++,j++) {
-		if (ptr[j]=='$') {
+		if (ptr[j] == '$') {
 			if (ptr[j+1]>='0' && ptr[j+1]<='9') {
 				int wordlen;
 				int w = ptr[j+1]-'0';
@@ -762,7 +781,7 @@ R_API int r_cmd_macro_cmd_args(RCmdMacro *mac, const char *ptr, const char *args
 				} else {
 					R_LOG_ERROR ("Undefined argument %d", w);
 				}
-			} else if (ptr[j+1]=='@') {
+			} else if (ptr[j + 1] == '@') {
 				char off[32];
 				int offlen;
 				offlen = snprintf (off, sizeof (off), "%d",
@@ -770,7 +789,7 @@ R_API int r_cmd_macro_cmd_args(RCmdMacro *mac, const char *ptr, const char *args
 				if ((i + offlen + 1) >= sizeof (cmd)) {
 					return -1;
 				}
-				memcpy (cmd+i, off, offlen+1);
+				memcpy (cmd + i, off, offlen + 1);
 				i += offlen-1;
 				j++;
 			} else {
@@ -786,7 +805,7 @@ R_API int r_cmd_macro_cmd_args(RCmdMacro *mac, const char *ptr, const char *args
 		;
 	}
 	//eprintf ("-pre %d\n", (int)mac->num->value);
-	int xx = (*pcmd==')')? 0: mac->cmd (mac->user, pcmd);
+	int xx = (*pcmd == ')')? 0: mac->cmd (mac->user, pcmd);
 	//eprintf ("-pos %p %d\n", mac->num, (int)mac->num->value);
 	return xx;
 }
@@ -796,7 +815,7 @@ R_API char *r_cmd_macro_label_process(RCmdMacro *mac, RCmdMacroLabel *labels, in
 	for (; *ptr == ' '; ptr++) {
 		;
 	}
-	if (ptr[strlen (ptr) - 1]==':' && !strchr (ptr, ' ')) {
+	if (ptr[strlen (ptr) - 1] == ':' && !strchr (ptr, ' ')) {
 		/* label detected */
 		if (ptr[0] == '.') {
 		//	eprintf("---> GOTO '%s'\n", ptr+1);
@@ -809,7 +828,7 @@ R_API char *r_cmd_macro_label_process(RCmdMacro *mac, RCmdMacroLabel *labels, in
 			}
 			return NULL;
 			/* conditional goto */
-		} else if (ptr[0]=='?' && ptr[1]=='!' && ptr[2] != '?') {
+		} else if (ptr[0] == '?' && ptr[1] == '!' && ptr[2] != '?') {
 			if (mac->num && mac->num->value != 0) {
 				char *label = ptr + 3;
 				for (; *label == ' ' || *label == '.'; label++) {
@@ -852,7 +871,7 @@ R_API char *r_cmd_macro_label_process(RCmdMacro *mac, RCmdMacroLabel *labels, in
 		//	eprintf("===> ADD LABEL(%s)\n", ptr);
 			if (i == 0) {
 				strncpy (labels[*labels_n].name, ptr, 64);
-				labels[*labels_n].ptr = ptr+strlen (ptr)+1;
+				labels[*labels_n].ptr = ptr + strlen (ptr) + 1;
 				*labels_n = *labels_n + 1;
 			}
 		}
@@ -877,7 +896,7 @@ R_API int r_cmd_macro_call(RCmdMacro *mac, const char *name) {
 	}
 	char *ptr = strchr (str, ')');
 	if (!ptr) {
-		R_LOG_ERROR ("Missing end ')' parenthesis");
+		R_LOG_ERROR ("Missing end ')' parenthesis in '%s'", str);
 		free (str);
 		return false;
 	} else {
@@ -962,7 +981,7 @@ R_API int r_cmd_macro_call(RCmdMacro *mac, const char *name) {
 					*end = '\n';
 					ptr = end + 1;
 				} else {
-					mac->macro_level --;
+					mac->macro_level--;
 					free (str);
 					goto out_clean;
 				}

@@ -14,17 +14,21 @@ R_API bool r_project_rename(RProject *p, const char *newname) {
 	if (!r_project_is_loaded (p)) {
 		return false;
 	}
-	char *newprjdir = r_file_new (p->path, "..", newname, NULL);
-	if (r_file_exists (newprjdir)) {
-		R_LOG_ERROR ("Cannot rename project");
-		free (newprjdir);
-		return false;
+	char *new_prjdir = r_file_new (p->path, "..", newname, NULL);
+	char *new_name = strdup (newname);
+	if (new_name && new_prjdir) {
+		free (p->path);
+		free (p->name);
+		p->path = new_prjdir;
+		p->name = new_name;
+		if (p->rvc) {
+			rvc_close (p->rvc, true);
+			p->rvc = NULL;
+		}
+		return true;
 	}
-	r_file_move (p->path, newprjdir);
-	free (p->path);
-	p->path = newprjdir;
-	free (p->name);
-	p->name = strdup (newname);
+	free (new_prjdir);
+	free (new_name);
 	return false;
 }
 
@@ -42,7 +46,7 @@ R_API void r_project_close(RProject *p) {
 		R_FREE (p->name);
 		R_FREE (p->path);
 		if (p->rvc) {
-			r_vc_close (p->rvc, true);
+			rvc_close (p->rvc, true);
 			p->rvc = NULL;
 		}
 	}

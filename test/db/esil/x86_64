@@ -359,7 +359,6 @@ NAME=reg size bitmask
 FILE=-
 CMDS=<<EOF
 e io.va=true
-e esil.debug=true
 e asm.arch=x86
 e asm.bits=64
 aei
@@ -383,7 +382,6 @@ NAME=mem read
 FILE=-
 CMDS=<<EOF
 e io.va=true
-e esil.debug=true
 e asm.arch=x86
 e asm.bits=64
 aei
@@ -569,5 +567,48 @@ pv4 @ rsp
 EOF
 EXPECT=<<EOF
 0x42424242
+EOF
+RUN
+
+NAME=push rsp,,pop rsp
+FILE=-
+ARGS=-a x86 -b 64
+CMDS=<<EOF
+e io.cache=true
+aei
+aeim
+ar rip=0 ; "wa push rsp ; pop rsp" @ 0 ; ?en rsp before : ; ?v rsp ; 2aes  ; ?en rsp after  : ; ?v rsp
+EOF
+EXPECT=<<EOF
+rsp before :0x178000
+rsp after  :0x178000
+EOF
+RUN
+
+NAME=128set and weakset
+FILE=-
+ARGS=-a x86 -b 64
+CMDS=<<EOF
+ae 1,xmm0,=;ar xmm0
+ae 1,xmm0,:=;ar xmm0
+EOF
+EXPECT=<<EOF
+0x00000000000000000000000000000001
+0x00000000000000000000000000000001
+EOF
+RUN
+
+NAME=step until esil
+FILE=bins/mach0/ls-m1
+ARGS=-a arm -b 64
+CMDS=<<EOF
+aeim
+ar?pc
+aesue pc,0x100003ad0,==,$z
+ar?pc
+EOF
+EXPECT=<<EOF
+0x100003a90
+0x100003ad0
 EOF
 RUN

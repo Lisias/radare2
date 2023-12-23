@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2016 - Oscar Salvador */
+/* radare - LGPL - Copyright 2016-2023 - Oscar Salvador */
 
 #include <r_debug.h>
 
@@ -331,6 +331,7 @@ static bool dump_this_map(char *buff_smaps, linux_map_entry_t *entry, ut8 filter
 	char *identity = r_str_newf (fmt_addr, entry->start_addr, entry->end_addr);
 	bool found = false;
 	char *aux = NULL;
+	char *save_ptr = NULL;
 	ut8 vmflags = 0, perms = entry->perms;
 
 	if (!identity) {
@@ -402,7 +403,7 @@ static bool dump_this_map(char *buff_smaps, linux_map_entry_t *entry, ut8 filter
 			//empty body
 		}
 		flags_str--;
-		p = strtok (flags_str, " ");
+		p = r_str_tok_r (flags_str, " ", &save_ptr);
 		while (p) {
 			if (!strncmp (p, "sh", 2)) {
 				vmflags |= SH_FLAG;
@@ -416,7 +417,7 @@ static bool dump_this_map(char *buff_smaps, linux_map_entry_t *entry, ut8 filter
 			if (!strncmp (p, "dd", 2)) {
 				vmflags |= DD_FLAG;
 			}
-			p = strtok (NULL, " ");
+			p = r_str_tok_r (NULL, " ", &save_ptr);
 		}
 
 		if (!(vmflags & SH_FLAG)) {
@@ -1037,14 +1038,14 @@ void write_note_hdr (note_type_t type, ut8 **note_data) {
 
 static int *get_unique_thread_id(RDebug *dbg, int n_threads) {
 	RListIter *it;
-	RList *list;
 	RDebugPid *th;
 	int *thread_id = NULL;
 	int i = 0;
 	bool found = false;
 
-	if (dbg->h) {
-		list = dbg->h->threads (dbg, dbg->pid);
+	RDebugPlugin *plugin = R_UNWRAP3 (dbg, current, plugin);
+	if (plugin != NULL) {
+		RList *list = plugin->threads (dbg, dbg->pid);
 		if (!list) {
 			return NULL;
 		}

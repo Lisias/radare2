@@ -13,7 +13,6 @@ LINK+=-g
 endif
 
 LIBR:=$(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-# /libr
 
 ALL?=
 CFLAGS:=-I$(LIBR) -I$(LIBR)/include $(CFLAGS)
@@ -48,7 +47,7 @@ endif
 else
 ifeq (${OSTYPE},darwin)
 ifeq (${HAVE_LIBVERSION},1)
-LIBNAME=${LDFLAGS_SONAME}${LIB}.${LIBVERSION}.${EXT_SO}
+LIBNAME=${LDFLAGS_SONAME}${LIB}.${ABIVERSION}.${EXT_SO}
 else
 LIBNAME=${LDFLAGS_SONAME}${LIB}.${EXT_SO}
 endif

@@ -8,7 +8,7 @@ R2DEPS=r_util r_io r_socket r_magic r_syscall r_cons r_crypto r_fs
 
 pre: $(LIBSO) $(LIBAR)
 	$(MAKE) -C p
-	$(MAKE) -C d
+	$(MAKE) -C d || true
 
 CFLAGS+=-DR2_PLUGIN_INCORE -Iformat -Imangling
 
@@ -24,7 +24,7 @@ OBJS=bin.o dbginfo.o bin_ldr.o bin_write.o demangle.o
 OBJS+=dwarf.o bfilter.o bfile.o bobj.o blang.o
 OBJS+=mangling/cxx/cp-demangle.o ${STATIC_OBJS}
 OBJS+=mangling/demangler.o
-OBJS+=mangling/microsoft_demangle.o
+OBJS+=mangling/microsoft.o
 OBJS+=mangling/objc.o mangling/cxx.o mangling/msvc.o
 OBJS+=mangling/swift.o mangling/swift-sd.o
 OBJS+=mangling/java.o

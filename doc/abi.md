@@ -15,6 +15,8 @@ the next big release, the .9 versions are always the most unstable as they focus
 on quick development in order to make all the breaking changes needed to
 introduce new features or simplify the usage of some apis.
 
+## Development rules
+
 What you **CANNOT** do between X.Y.0 and X.Y.8:
 
 * Add, Remove or rename public functions, structs or enums
@@ -24,7 +26,7 @@ What you **CANNOT** do between X.Y.0 and X.Y.8:
 
 What you **CAN** do between X.Y.0 and X.Y.8:
 
-* Remove global symbols (they shouldnt be accessed directly anyway)
+* Remove global symbols (they shouldn't be accessed directly anyway)
 * Change internal structs or functions (static)
 * Refactor the programs (those are not libraries and dont expose apis)
 * If you really need to add a new public function use `R2_XY0 static inline`
@@ -40,3 +42,9 @@ What you **MUST** do in X.Y.9:
 
 * Remove everything marked as `R_DEPRECATE` or `R2_XY0`. Use `git grep` to find them out
 * Anything that was forbidden 
+
+## CI
+
+All this is checked in the CI with the `abidiff` utility.
+
+[.github/workflows/build.yml#L607](../../94a31e97b868ead86d27031280ead2f5c64fecbd/.github/workflows/build.yml#L607)

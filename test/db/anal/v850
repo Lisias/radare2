@@ -173,7 +173,7 @@ EXPECT=<<EOF
 0x001044d0    1      4 fcn.001044d0
 0x00104654    2     26 fcn.00104654
 0x00104b72    3     62 fcn.00104b72
-0x00104ec0    2     30 fcn.00104ec0
+0x00104ec0    1      4 fcn.00104ec0
 0x00104ec4   16    300 sym.___udivdi3
 0x001052d8    5     74 sym.___main
 0x00105322    3     34 sym._exit
@@ -464,7 +464,7 @@ RUN
 NAME=v850.np r0ref
 FILE=-
 CMDS=<<EOF
-e anal.arch=?~v850
+-a?~v850
 e asm.bits=32
 e asm.arch=v850
 wx 830c
@@ -490,5 +490,16 @@ EOF
 EXPECT=<<EOF
 mov 0x674, r1
 mov 0x34120674, r1
+EOF
+RUN
+
+
+NAME=v850 10x bug
+FILE=malloc://1024
+CMDS=<<EOF
+!rasm2 -a v850 -d 01fb
+EOF
+EXPECT=<<EOF
+sld.b 1, lp
 EOF
 RUN

@@ -1,8 +1,8 @@
-/* radare - LGPL - Copyright 2008-2022 nibble, pancake, inisider */
+/* radare - LGPL - Copyright 2008-2023 nibble, pancake, inisider */
 
 #include <r_hash.h>
 #include <r_util.h>
-#include <ht_uu.h>
+#include <sdb/ht_uu.h>
 #include "pe.h"
 
 #define PE_IMAGE_FILE_MACHINE_RPI2 452
@@ -38,7 +38,7 @@ typedef struct {
 } SCV_RSDS_HEADER;
 
 R_API RBinPEObj* PE_(get)(RBinFile *bf) {
-	return (bf && bf->o)? bf->o->bin_obj: NULL;
+	return (bf && bf->bo)? bf->bo->bin_obj: NULL;
 }
 
 static inline int is_thumb(RBinPEObj* pe) {
@@ -73,6 +73,19 @@ static inline bool follow_offset(struct r_bin_pe_addr_t *entry, RBuffer *buf, ut
 	entry->paddr += dst_offset;
 	entry->vaddr += dst_offset;
 	return read_and_follow_jump (entry, buf, b, len, big_endian);
+}
+
+static st32 sign_extend(ut32 n, ut32 bits) {
+	const st32 m = 1U << (bits - 1);
+	n = n & ((1U << bits) - 1);
+	return (n ^ m) - m;
+}
+
+static inline bool follow_offset_arm64(struct r_bin_pe_addr_t *entry, RBuffer *buf, ut8 *b, int len, bool big_endian, size_t instr_off) {
+	const st32 dst_offset = sign_extend (r_read_ble32 (b + instr_off, big_endian) & 0x3ffffff, 26) * 4 + instr_off;
+	entry->paddr += dst_offset;
+	entry->vaddr += dst_offset;
+	return r_buf_read_at (buf, entry->paddr, b, len) > 0;
 }
 
 struct r_bin_pe_addr_t *PE_(check_msvcseh)(RBinPEObj *pe) {
@@ -247,6 +260,54 @@ struct r_bin_pe_addr_t *PE_(check_msvcseh)(RBinPEObj *pe) {
 			}
 		}
 	}
+
+	// MSVC Arm64
+	if (b[0] == 0x7f && b[1] == 0x23 && b[2] == 0x03 && b[3] == 0xd5) {
+		// 7f 23 03 d5     pacibsp
+		// fd 7b bf a9     stp        x29,x30,[sp, #local_10]!
+		// fd 03 00 91     mov        x29,sp
+		// xx xx xx 94     bl         __security_init_cookie
+		// xx xx xx 97     bl         __scrt_common_main_seh <-- Follow this
+		// fd 7b c1 a8     ldp        x29=>local_10,x30,[sp], #0x10
+		// ff 23 03 d5     autibsp
+		// c0 03 5f d6     ret
+		if (follow_offset_arm64 (entry, pe->b, b, sizeof (b), pe->big_endian, 16)) {
+			// case 1
+			// e2 03 14 aa  mov        x2,x20
+			// e1 03 13 aa  mov        x1,x19
+			// xx xx xx 94 	bl         main
+			for (n = 0; n < sizeof (b) - 12; n++) {
+				if (b[n] == 0xe2 && b[n + 1] == 0x03 && b[n + 2] == 0x14 && b[n + 3] == 0xaa && b[n + 4] == 0xe1 && b[n + 5] == 0x03 && b[n + 6] == 0x13 && b[n + 7] == 0xaa && (b[n + 11] & 0xfc) == 0x94)	{
+					follow_offset_arm64 (entry, pe->b, b, sizeof (b), pe->big_endian, 8 + n);
+					return entry;
+				}
+			}
+
+			// case 2
+			// 33 xx xx xx     add        x19,x9,xxxxxxxx
+			// 60 02 40 b9     ldr        w0,[x19]=>DAT_1400be060
+			// xx xx xx 97     bl         main
+			for (n = 0; n < sizeof (b) - 12; n++) {
+				if (b[n] == 0x33 && b[n + 4] == 0x60 && b[n + 5] == 0x02 && b[n + 6] == 0x40 && b[n + 7] == 0xb9 && (b[n + 11] & 0xfc) == 0x94) {
+					follow_offset_arm64 (entry, pe->b, b, sizeof (b), pe->big_endian, 8 + n);
+					return entry;
+				}
+			}
+
+			// case 3
+			// 01 00 80 d2     mov        x1,#0x0
+			// a8 ff ff d0     adrp       x8,xxxxxxxx
+			// 00 01 xx 91     add        x0,x8,xxxxxxxx
+			// xx xx xx 94     bl         wWinMain
+			for (n = 0; n < sizeof (b) - 16; n++) {
+				if (b[n] == 0x01 && b[n + 1] == 0x00 && b[n + 2] == 0x80 && b[n + 3] == 0xd2 && (b[n + 4] & 0x1f) == 0x8 && (b[n + 7] & 0x9f) == 0x90 && b[n + 8] == 0 && (b[n + 9] & 3) == 1 && (b[n + 11] & 0x7f) == 0x11 && (b[n + 15] & 0xfc) == 0x94) {
+					follow_offset_arm64 (entry, pe->b, b, sizeof (b), pe->big_endian, 12 + n);
+					return entry;
+				}
+			}
+		}
+	}
+
 	//Microsoft Visual-C
 	// 50                  push eax
 	// FF 75 9C            push dword [ebp - local_64h]
@@ -864,7 +925,7 @@ static struct r_bin_pe_export_t* parse_symbol_table(RBinPEObj* pe, struct r_bin_
 							name[sizeof (name) - 1] = 0;
 							strncpy ((char*) exp[symctr].name, longname, PE_NAME_LENGTH - 1);
 						} else {
-							sprintf ((char*) exp[symctr].name, "unk_%d", symctr);
+							snprintf ((char*) exp[symctr].name, PE_NAME_LENGTH, "unk_%d", symctr);
 						}
 					}
 					exp[symctr].name[PE_NAME_LENGTH] = '\0';
@@ -1443,7 +1504,7 @@ static int bin_pe_init_imports(RBinPEObj* pe) {
 	int dir_size = sizeof (PE_(image_import_directory));
 	int delay_import_size = sizeof (PE_(image_delay_import_directory));
 	int indx = 0;
-	int rr, count = 0;
+	int rr;
 	int import_dir_size = data_dir_import->Size;
 	int delay_import_dir_size = data_dir_delay_import->Size;
 	/// HACK to modify import size because of begin 0.. this may report wrong info con corkami tests
@@ -1469,7 +1530,6 @@ static int bin_pe_init_imports(RBinPEObj* pe) {
 			import_dir_size = maxidsz;
 		}
 		pe->import_directory_offset = import_dir_offset;
-		count = 0;
 		do {
 			new_import_dir = (PE_(image_import_directory)*)realloc (import_dir, ((1 + indx) * dir_size));
 			if (!new_import_dir) {
@@ -1490,7 +1550,6 @@ static int bin_pe_init_imports(RBinPEObj* pe) {
 				break; //goto fail;
 			}
 			indx++;
-			count++;
 		} while (curr_import_dir->FirstThunk != 0 || curr_import_dir->Name != 0 ||
 		curr_import_dir->TimeDateStamp != 0 || curr_import_dir->Characteristics != 0 ||
 		curr_import_dir->ForwarderChain != 0);
@@ -3126,8 +3185,7 @@ R_API void PE_(bin_pe_parse_resource)(RBinPEObj *pe) {
 	Pe_image_resource_directory *rs_directory = pe->resource_directory;
 	ut32 curRes = 0;
 	int totalRes = 0;
-	HtUUOptions opt = {0};
-	HtUU *dirs = ht_uu_new_opt (&opt); //to avoid infinite loops
+	HtUU *dirs = ht_uu_new0 (); //to avoid infinite loops
 	if (!dirs) {
 		return;
 	}
@@ -3329,6 +3387,7 @@ char* PE_(r_bin_pe_get_arch)(RBinPEObj* pe) {
 		break;
 	case PE_IMAGE_FILE_MACHINE_POWERPC:
 	case PE_IMAGE_FILE_MACHINE_POWERPCFP:
+	case PE_IMAGE_FILE_MACHINE_POWERPCBE:
 		arch = strdup ("ppc");
 		break;
 	case PE_IMAGE_FILE_MACHINE_EBC:
@@ -4003,6 +4062,7 @@ char* PE_(r_bin_pe_get_machine)(RBinPEObj* pe) {
 		case PE_IMAGE_FILE_MACHINE_MIPSFPU16: machine = "Mips FPU 16"; break;
 		case PE_IMAGE_FILE_MACHINE_POWERPC: machine = "PowerPC"; break;
 		case PE_IMAGE_FILE_MACHINE_POWERPCFP: machine = "PowerPC FP"; break;
+		case PE_IMAGE_FILE_MACHINE_POWERPCBE: machine = "PowerPC BE"; break;
 		case PE_IMAGE_FILE_MACHINE_R10000: machine = "R10000"; break;
 		case PE_IMAGE_FILE_MACHINE_R3000: machine = "R3000"; break;
 		case PE_IMAGE_FILE_MACHINE_R4000: machine = "R4000"; break;
@@ -4209,12 +4269,9 @@ void PE_(r_bin_pe_check_sections)(RBinPEObj* pe, struct r_bin_pe_section_t* * se
 	*sects = sections;
 out_function:
 	free (entry);
-	return;
-
 }
 
 static struct r_bin_pe_section_t* PE_(r_bin_pe_get_sections)(RBinPEObj* pe) {
-	struct r_bin_pe_section_t* sections = NULL;
 	int i, j, section_count = 0;
 
 	if (!pe || !pe->nt_headers) {
@@ -4227,7 +4284,7 @@ static struct r_bin_pe_section_t* PE_(r_bin_pe_get_sections)(RBinPEObj* pe) {
 			section_count++;
 		}
 	}
-	sections = calloc (section_count + 1, sizeof (struct r_bin_pe_section_t));
+	struct r_bin_pe_section_t* sections = calloc (section_count + 1, sizeof (struct r_bin_pe_section_t));
 	if (!sections) {
 		r_sys_perror ("malloc (sections)");
 		return NULL;
@@ -4280,15 +4337,14 @@ static struct r_bin_pe_section_t* PE_(r_bin_pe_get_sections)(RBinPEObj* pe) {
 					sections[j].vsize += sa - diff;
 				}
 				if (sections[j].vaddr % sa) {
-					pe_printf ("Warning: section %s not aligned to SectionAlignment.\n",
-							sections[j].name);
+					R_LOG_WARN ("section %s not aligned to SectionAlignment", sections[j].name);
 				}
 			}
 			const ut32 fa = pe->optional_header->FileAlignment;
 			if (fa) {
 				const ut64 diff = sections[j].paddr % fa;
-				if (diff) {
-					pe_printf ("Warning: section %s not aligned to FileAlignment.\n", sections[j].name);
+				if (diff != 0) {
+					R_LOG_WARN ("section %s not aligned to FileAlignment", sections[j].name);
 					sections[j].paddr -= diff;
 					sections[j].size += diff;
 				}
@@ -4356,14 +4412,16 @@ int PE_(r_bin_pe_is_pie)(RBinPEObj* pe) {
 }
 
 int PE_(r_bin_pe_is_big_endian)(RBinPEObj* pe) {
-	ut16 arch;
 	if (!pe || !pe->nt_headers) {
 		return false;
 	}
-	arch = pe->nt_headers->file_header.Machine;
-	if (arch == PE_IMAGE_FILE_MACHINE_I386 ||
-	arch == PE_IMAGE_FILE_MACHINE_AMD64) {
+	const ut16 arch = pe->nt_headers->file_header.Machine;
+	switch (arch) {
+	case PE_IMAGE_FILE_MACHINE_I386:
+	case PE_IMAGE_FILE_MACHINE_AMD64:
 		return false;
+	case PE_IMAGE_FILE_MACHINE_POWERPCBE:
+		return true;
 	}
 	return HASCHR (PE_IMAGE_FILE_BYTES_REVERSED_HI);
 }

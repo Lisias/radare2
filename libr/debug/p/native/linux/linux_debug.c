@@ -1,16 +1,13 @@
-/* radare - LGPL - Copyright 2009-2022 - pancake */
+/* radare - LGPL - Copyright 2009-2023 - pancake */
 
 #include <r_userconf.h>
 
 #if DEBUGGER
 #include <r_debug.h>
 #include <r_asm.h>
-#include <r_reg.h>
 #include <r_lib.h>
 #include <r_anal.h>
-#include <signal.h>
 #include <sys/uio.h>
-#include <errno.h>
 #include "linux_debug.h"
 #include "../procfs.h"
 
@@ -346,7 +343,6 @@ int linux_step(RDebug *dbg) {
 	int ret = false;
 	int pid = dbg->tid;
 	ret = r_debug_ptrace (dbg, PTRACE_SINGLESTEP, pid, 0, 0);
-	//XXX(jjd): why?? //linux_handle_signals (dbg);
 	if (ret == -1) {
 		r_sys_perror ("native-singlestep");
 		ret = false;
@@ -685,7 +681,7 @@ static bool linux_attach_single_pid(RDebug *dbg, int pid) {
 
 static RList *get_pid_thread_list(RDebug *dbg, int main_pid) {
 	RList *list = r_list_new ();
-	if (list) {
+	if (R_LIKELY (list)) {
 		list = linux_thread_list (dbg, main_pid, list);
 		dbg->main_pid = main_pid;
 	}
@@ -854,12 +850,18 @@ RList *linux_thread_list(RDebug *dbg, int pid, RList *list) {
 	char *ptr, buf[PATH_MAX];
 	RDebugPid *pid_info = NULL;
 	ut64 pc = 0;
-	int prev_tid = dbg->tid;
-
-	if (!pid) {
+	if (pid < 1) {
 		r_list_free (list);
 		return NULL;
 	}
+	if (dbg->tid < 1) {
+		dbg->tid = pid;
+		dbg->pid = pid;
+	}
+	int prev_pid = dbg->pid;
+	int prev_tid = dbg->tid;
+	dbg->pid = pid;
+	dbg->tid = pid;
 
 	list->free = (RListFree)&r_debug_pid_free;
 	/* if this process has a task directory, use that */
@@ -868,6 +870,7 @@ RList *linux_thread_list(RDebug *dbg, int pid, RList *list) {
 		struct dirent *de;
 		DIR *dh = opendir (buf);
 		// Update the process' memory maps to set correct paths
+		dbg->pid = pid;
 		dbg->coreb.syncDebugMaps (dbg->coreb.core);
 		while ((de = readdir (dh))) {
 			if (!strcmp (de->d_name, ".") || !strcmp (de->d_name, "..")) {
@@ -913,7 +916,7 @@ RList *linux_thread_list(RDebug *dbg, int pid, RList *list) {
 		closedir (dh);
 		// Return to the original thread
 		linux_attach_single_pid (dbg, prev_tid);
-		dbg->pid = pid;
+		dbg->pid = prev_pid;
 		dbg->tid = prev_tid;
 		r_debug_reg_sync (dbg, R_REG_TYPE_GPR, false);
 	} else {
@@ -1112,8 +1115,8 @@ bool linux_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 		return true;
 		break;
 	case R_REG_TYPE_FPU:
-	case R_REG_TYPE_MMX:
-	case R_REG_TYPE_XMM:
+	case R_REG_TYPE_VEC64: // MMX
+	case R_REG_TYPE_VEC128: // XMM
 		{
 #if __x86_64__ || __i386__
 		struct user_fpregs_struct fpregs;
@@ -1178,42 +1181,10 @@ bool linux_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 #endif
 		}
 		break;
-	case R_REG_TYPE_SEG:
-	case R_REG_TYPE_FLG:
-	case R_REG_TYPE_GPR:
-		{
-			R_DEBUG_REG_T regs;
-			memset (&regs, 0, sizeof (regs));
-			memset (buf, 0, size);
-#if (__arm64__ || __aarch64__ || __s390x__) && defined(PTRACE_GETREGSET)
-			struct iovec io = {
-				.iov_base = &regs,
-				.iov_len = sizeof (regs)
-			};
-			ret = r_debug_ptrace (dbg, PTRACE_GETREGSET, pid, (void*)(size_t)1, &io);
-			// ret = ptrace (PTRACE_GETREGSET, pid, (void*)(size_t)(NT_PRSTATUS), NULL); // &io);
-#elif __BSD__ && (__POWERPC__ || __sparc__)
-			ret = r_debug_ptrace (dbg, PTRACE_GETREGS, pid, &regs, NULL);
-#else
-			/* linux -{arm/mips/riscv/x86/x86_64} */
-			ret = r_debug_ptrace (dbg, PTRACE_GETREGS, pid, NULL, &regs);
-#endif
-			/*
-			 * if perror here says 'no such process' and the
-			 * process exists still.. is because there's a missing call
-			 * to 'wait'. and the process is not yet available to accept
-			 * more ptrace queries.
-			 */
-			if (ret != 0) {
-				r_sys_perror ("PTRACE_GETREGS");
-				return false;
-			}
-			size = R_MIN (sizeof (regs), size);
-			memcpy (buf, &regs, size);
-			return size;
-		}
+	case R_REG_TYPE_VEC512: // ZMM
+		R_LOG_DEBUG ("zmm registers not supported yet");
 		break;
-	case R_REG_TYPE_YMM:
+	case R_REG_TYPE_VEC256: // YMM
 		{
 #if HAVE_YMM && __x86_64__ && defined(PTRACE_GETREGSET)
 		ut32 ymm_space[128];	// full ymm registers
@@ -1253,6 +1224,47 @@ bool linux_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 		return false;
 		}
 		break;
+	case R_REG_TYPE_SEG:
+	case R_REG_TYPE_FLG:
+	case R_REG_TYPE_GPR:
+		{
+			R_DEBUG_REG_T regs;
+			memset (&regs, 0, sizeof (regs));
+			memset (buf, 0, size);
+#if (__arm64__ || __aarch64__ || __s390x__) && defined(PTRACE_GETREGSET)
+			struct iovec io = {
+				.iov_base = &regs,
+				.iov_len = sizeof (regs)
+			};
+			ret = r_debug_ptrace (dbg, PTRACE_GETREGSET, pid, (void*)(size_t)1, &io);
+			// ret = ptrace (PTRACE_GETREGSET, pid, (void*)(size_t)(NT_PRSTATUS), NULL); // &io);
+#elif R2__BSD__ && (__POWERPC__ || __sparc__)
+			ret = r_debug_ptrace (dbg, PTRACE_GETREGS, pid, &regs, NULL);
+#elif __riscv
+			// theres no PTRACE_GETREGS implemented for rv64
+			struct iovec iov;
+			iov.iov_base = &regs;
+			iov.iov_len = sizeof (regs);
+			ret = ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
+#else
+			/* linux -{arm/mips/x86/x86_64} */
+			ret = r_debug_ptrace (dbg, PTRACE_GETREGS, pid, NULL, &regs);
+#endif
+			/*
+			 * if perror here says 'no such process' and the
+			 * process exists still.. is because there's a missing call
+			 * to 'wait'. and the process is not yet available to accept
+			 * more ptrace queries.
+			 */
+			if (ret != 0) {
+				r_sys_perror ("PTRACE_GETREGS");
+				return false;
+			}
+			size = R_MIN (sizeof (regs), size);
+			memcpy (buf, &regs, size);
+			return size;
+		}
+		break;
 	}
 	return false;
 }
@@ -1280,7 +1292,7 @@ bool linux_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
 #endif
 	}
 	if (type == R_REG_TYPE_GPR) {
-#if __arm64__ || __aarch64__ || __s390x__
+#if __arm64__ || __aarch64__ || __s390x__ || __riscv
 		struct iovec io = {
 			.iov_base = (void*)buf,
 			.iov_len = sizeof (R_DEBUG_REG_T)

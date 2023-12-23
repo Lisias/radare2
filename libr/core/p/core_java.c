@@ -27,12 +27,12 @@ static const char *r_cmd_java_strtok(const char *str1, const char b, size_t len)
 static const char *r_cmd_java_consumetok(const char *str1, const char b, size_t len);
 static int r_cmd_java_reload_bin_from_buf(RCore *core, RBinJavaObj *obj, ut8* buffer, ut64 len);
 
-static int r_cmd_java_print_json_definitions( RBinJavaObj *obj  );
-static int r_cmd_java_print_all_definitions( RAnal *anal );
-static int r_cmd_java_print_class_definitions( RBinJavaObj *obj );
-static int r_cmd_java_print_field_definitions( RBinJavaObj *obj );
-static int r_cmd_java_print_method_definitions( RBinJavaObj *obj );
-static int r_cmd_java_print_import_definitions( RBinJavaObj *obj );
+static int r_cmd_java_print_json_definitions(RBinJavaObj *obj);
+static int r_cmd_java_print_all_definitions(RAnal *anal);
+static int r_cmd_java_print_class_definitions(RBinJavaObj *obj);
+static int r_cmd_java_print_field_definitions(RBinJavaObj *obj);
+static int r_cmd_java_print_method_definitions(RBinJavaObj *obj);
+static int r_cmd_java_print_import_definitions(RBinJavaObj *obj);
 
 static int r_cmd_java_resolve_cp_idx(RBinJavaObj *obj, ut16 idx);
 static int r_cmd_java_resolve_cp_type(RBinJavaObj *obj, ut16 idx);
@@ -376,7 +376,7 @@ static int r_cmd_java_handle_help(RCore *core, const char *input) {
 	const char **help_msg = (const char **)malloc (sizeof (char *) * END_CMDS * 4);
 	help_msg[0] = "Usage:";
 	help_msg[1] = "java [cmd] [arg..] ";
-	help_msg[2] = r_core_plugin_java.desc;
+	help_msg[2] = r_core_plugin_java.meta.desc;
 	for (i = 0; JAVA_CMDS[i].name; i++) {
 		RCmdJavaCmd *cmd = &JAVA_CMDS[i];
 		help_msg[3 + (i * 3) + 0] = cmd->name;
@@ -525,7 +525,7 @@ static int r_cmd_java_reload_bin_from_buf(RCore *core, RBinJavaObj *obj, ut8 *bu
 		RBinPlugin *tmp;
 		RListIter *iter;
 		r_list_foreach (core->bin->plugins, iter, tmp) {
-			if (!strncmp ("java", tmp->name, 4)) {
+			if (!strncmp ("java", tmp->meta.name, 4)) {
 				//cp = tmp;
 				break;
 			}
@@ -1381,13 +1381,14 @@ static int r_cmd_java_handle_set_flags(RCore *core, const char *input) {
 	const char *p = r_cmd_java_consumetok (input, ' ', -1);
 	ut64 addr = p && r_cmd_java_is_valid_input_num_value (core, p)
 		? r_cmd_java_get_input_num_value (core, p)
-		: (ut64)-1;
+		: UT64_MAX;
 	p = r_cmd_java_strtok (p + 1, ' ', -1);
-	if (!p || !*p) {
+	if (R_STR_ISEMPTY (p)) {
 		r_cmd_java_print_cmd_help (JAVA_CMDS + SET_ACC_FLAGS_IDX);
 		return true;
 	}
-	const char f_type = p && *p? r_cmd_java_is_valid_java_mcf (*(++p)): '?';
+	p++;
+	const char f_type = r_cmd_java_is_valid_java_mcf (*p);
 
 	int flag_value = r_cmd_java_is_valid_input_num_value (core, p)? r_cmd_java_get_input_num_value (core, p): -1;
 
@@ -1406,7 +1407,7 @@ static int r_cmd_java_handle_set_flags(RCore *core, const char *input) {
 	if (!input) {
 		eprintf ("[-] r_cmd_java: no address provided .\n");
 		res = true;
-	} else if (addr == (ut64)-1) {
+	} else if (addr == UT64_MAX) {
 		eprintf ("[-] r_cmd_java: no address provided .\n");
 		res = true;
 	} else if (f_type == '?' && flag_value == -1) {
@@ -1610,12 +1611,12 @@ static RBinJavaObj *r_cmd_java_get_bin_obj(RAnal *anal) {
 		return NULL;
 	}
 	b = anal->binb.bin;
-	if (!b->cur || !b->cur->o) {
+	if (!b->cur || !b->cur->bo) {
 		return NULL;
 	}
-	plugin = b->cur->o->plugin;
-	is_java = (plugin && strcmp (plugin->name, "java") == 0)? 1: 0;
-	return is_java? b->cur->o->bin_obj: NULL;
+	plugin = b->cur->bo->plugin;
+	is_java = (plugin && strcmp (plugin->meta.name, "java") == 0)? 1: 0;
+	return is_java? b->cur->bo->bin_obj: NULL;
 }
 
 static int r_cmd_java_resolve_cp_idx(RBinJavaObj *obj, ut16 idx) {
@@ -1648,7 +1649,7 @@ static int r_cmd_java_resolve_cp_idx_b64(RBinJavaObj *obj, ut16 idx) {
 static int r_cmd_java_resolve_cp_address(RBinJavaObj *obj, ut16 idx) {
 	if (obj && idx) {
 		ut64 addr = r_bin_java_resolve_cp_idx_address (obj, idx);
-		if (addr == (ut64)-1) {
+		if (addr == UT64_MAX) {
 			r_cons_printf ("Unable to resolve CP Object @ index: 0x%04x\n", idx);
 		} else {
 			r_cons_printf ("0x%" PFMT64x "\n", addr);
@@ -1659,7 +1660,7 @@ static int r_cmd_java_resolve_cp_address(RBinJavaObj *obj, ut16 idx) {
 
 static int r_cmd_java_resolve_cp_to_key(RBinJavaObj *obj, ut16 idx) {
 	if (obj && idx) {
-		char *str = r_bin_java_resolve_cp_idx_to_string (obj, idx);
+		char *str = r_bin_java_resolve_cp_idx_tostring (obj, idx);
 		r_cons_println (str);
 		free (str);
 	}
@@ -1818,12 +1819,12 @@ static int r_cmd_java_handle_yara_code_extraction_refs(RCore *core, const char *
 	memcpy (name, p, n - p);
 
 	p = r_cmd_java_strtok (p, ' ', -1);
-	addr = p && *p && r_cmd_java_is_valid_input_num_value (core, p)? r_cmd_java_get_input_num_value (core, p): (ut64)-1;
+	addr = p && *p && r_cmd_java_is_valid_input_num_value (core, p)? r_cmd_java_get_input_num_value (core, p): UT64_MAX;
 
 	p = r_cmd_java_strtok (p, ' ', -1);
-	count = p && *p && r_cmd_java_is_valid_input_num_value (core, p)? r_cmd_java_get_input_num_value (core, p): (ut64)-1;
+	count = p && *p && r_cmd_java_is_valid_input_num_value (core, p)? r_cmd_java_get_input_num_value (core, p): UT64_MAX;
 
-	if (name && count != (ut64)-1 && addr != (ut64)-1) {
+	if (name && count != UT64_MAX && addr != UT64_MAX) {
 		// find function at addr
 		// find the start basic block
 		// read the bytes
@@ -1915,7 +1916,7 @@ static int r_cmd_java_handle_print_exceptions(RCore *core, const char *input) {
 		ut64 end = r_bin_java_get_method_end (bin, method);
 		ut8 do_this_one = start <= func_addr && func_addr <= end;
 		RList *exc_table = NULL;
-		do_this_one = func_addr == (ut64)-1? 1: do_this_one;
+		do_this_one = (func_addr == UT64_MAX)? 1: do_this_one;
 		if (!do_this_one) {
 			continue;
 		}
@@ -1946,9 +1947,11 @@ static int r_cmd_java_handle_print_exceptions(RCore *core, const char *input) {
 
 // PLUGIN Definition Info
 RCorePlugin r_core_plugin_java = {
-	.name = "java",
-	.desc = "Suite of java commands, java help for more info",
-	.license = "Apache",
+	.meta = {
+		.name = "java",
+		.desc = "Suite of java commands, java help for more info",
+		.license = "Apache",
+	},
 	.call = r_cmd_java_call,
 };
 

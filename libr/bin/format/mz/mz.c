@@ -139,7 +139,7 @@ RList *r_bin_mz_get_segments(const struct r_bin_mz_obj_t *bin) {
 		section->add = true;
 		section_number++;
 	}
-	section = r_list_get_top (seg_list);
+	section = r_list_last (seg_list);
 	section->size = bin->load_module_size - section->vaddr;
 	section->vsize = section->size;
 
@@ -220,7 +220,7 @@ static int r_bin_mz_init_hdr(struct r_bin_mz_obj_t *bin) {
 	if (dos_file_size > bin->size) {
 		return false;
 	}
-	eprintf ("ii %d %d\n", dos_file_size , (mz->header_paragraphs << 4));
+	// eprintf ("ii %d %d\n", dos_file_size , (mz->header_paragraphs << 4));
 	if (dos_file_size < (mz->header_paragraphs << 4)) {
 		bin->load_module_size = dos_file_size;
 	} else {

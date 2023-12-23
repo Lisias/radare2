@@ -24,7 +24,7 @@ ec pop rgb:09f
 ec crypto rgb:fff
 ec jmp rgb:e71
 ec cjmp rgb:e71
-ec call rgb:fc1 rgb:333
+ec call magenta
 ec nop rgb:7c5
 ec ret rgb:e34
 ec trap rgb:e34
@@ -42,6 +42,15 @@ ec ai.ascii rgb:fff
 ec gui.cflow rgb:09f
 ec gui.dataoffset rgb:99a
 ec gui.background rgb:7c5
-ec gui.alt_background rgb:e34
+ec gui.background2 rgb:e34
 ec gui.border rgb:23f
 ec graph.current rgb:aaf
+
+ec var rgb:555
+ec var.name rgb:09f
+ec var.type rgb:99a
+ec var.addr rgb:666
+
+# ec graph.box4=white
+# ""e graph.gv.node=fillcolor="#303030" color=lightgray bgcolor=red fontcolor=white penwidth=2 style=filled fontname="Courier Bold" fontsize=14 shape=box
+# e graph.gv.graph=bgcolor=black

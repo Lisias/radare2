@@ -1,10 +1,12 @@
 #ifndef R2_LIB_H
 #define R2_LIB_H
 
-#include "r_types.h"
-#include "r_list.h"
+#include <r_types.h>
+#include <r_list.h>
+#include <r_lib.h>
+#include <sdb/ht_pp.h>
 
-#if __UNIX__ && WANT_DYLINK
+#if R2__UNIX__ && WANT_DYLINK
 #include <dlfcn.h>
 #endif
 
@@ -22,7 +24,7 @@ R_LIB_VERSION_HEADER (r_lib);
 #define R_LIB_ENV "R2_LIBR_PLUGINS"
 
 /* TODO: This must depend on HOST_OS, and maybe move into r_types */
-#if __WINDOWS__
+#if R2__WINDOWS__
 #include <windows.h>
 #define R_LIB_EXT "dll"
 #elif __APPLE__
@@ -31,6 +33,25 @@ R_LIB_VERSION_HEADER (r_lib);
 #define R_LIB_EXT "so"
 #endif
 
+typedef enum r_plugin_status_t {
+	R_PLUGIN_STATUS_BROKEN = 0,
+	R_PLUGIN_STATUS_INCOMPLETE = 1,
+	R_PLUGIN_STATUS_BASIC = 2,
+	R_PLUGIN_STATUS_OK = 3,
+	R_PLUGIN_STATUS_GOOD= 4,
+	R_PLUGIN_STATUS_COMPLETE = 5,
+} RPluginStatus;
+
+typedef struct r_plugin_meta_t {
+	char *name;
+	char *desc;
+	char *author;
+	char *version;
+	char *license;
+	RPluginStatus status;
+} RPluginMeta;
+// rename to RLibPluginMeta ?
+
 /* store list of loaded plugins */
 typedef struct r_lib_plugin_t {
 	int type;
@@ -38,9 +59,10 @@ typedef struct r_lib_plugin_t {
 	void *data; /* user pointer */
 	struct r_lib_handler_t *handler;
 	void *dl_handler; // DL HANDLER
-	char *author;
-	char *version;
 	void (*free)(void *data);
+#if 0
+	RPluginMeta meta;
+#endif
 } RLibPlugin;
 
 /* store list of initialized plugin handlers */
@@ -87,6 +109,8 @@ enum {
 	R_LIB_TYPE_LAST
 };
 
+typedef int (*RLibLifeCycleCallback)(RLibPlugin *, void *, void *);
+
 typedef struct r_lib_t {
 	/* linked list with all the plugin handler */
 	/* only one handler per handler-id allowed */
@@ -95,7 +119,10 @@ typedef struct r_lib_t {
 	char *symnamefunc;
 	RList /*RLibPlugin*/ *plugins;
 	RList /*RLibHandler*/ *handlers;
+	RLibHandler *handlers_bytype[R_LIB_TYPE_LAST];
 	bool ignore_version;
+	// hashtable plugname = &plugin
+	HtPP *plugins_ht;
 } RLib;
 
 #ifdef R_API

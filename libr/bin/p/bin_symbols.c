@@ -4,7 +4,7 @@
 #include <r_util.h>
 #include <r_lib.h>
 #include <r_bin.h>
-#include <ht_uu.h>
+#include <sdb/ht_uu.h>
 #include "../i/private.h"
 #include "mach0/coresymbolication.h"
 
@@ -163,12 +163,12 @@ static RBinSymbol *bin_symbol_from_symbol(RCoreSymCacheElement *element, RCoreSy
 	RBinSymbol *sym = R_NEW0 (RBinSymbol);
 	if (sym) {
 		if (s->name && s->mangled_name) {
-			sym->dname = strdup (s->name);
-			sym->name = strdup (s->mangled_name);
+			sym->name = r_bin_name_new (s->mangled_name);
+			r_bin_name_demangled (sym->name, s->name);
 		} else if (s->name) {
-			sym->name = strdup (s->name);
+			sym->name = r_bin_name_new (s->name);
 		} else if (s->mangled_name) {
-			sym->name = s->mangled_name;
+			sym->name = r_bin_name_new (s->mangled_name);
 		}
 		sym->paddr = s->paddr;
 		sym->vaddr = r_coresym_cache_element_pa2va (element, s->paddr);
@@ -179,17 +179,13 @@ static RBinSymbol *bin_symbol_from_symbol(RCoreSymCacheElement *element, RCoreSy
 	return sym;
 }
 
-static RCoreSymCacheElement *parseDragons(RBinFile *bf, RBuffer *buf, int off, int bits, R_OWN char *file_name) {
-	D eprintf ("Dragons at 0x%x\n", off);
+static RCoreSymCacheElement *parse_dragons(RBinFile *bf, RBuffer *buf, int off, int bits, R_OWN char *file_name) {
 	st64 size = r_buf_size (buf);
-	if (off >= size) {
+	if (size < 0 || off >= size) {
 		return NULL;
 	}
 	size -= off;
-	if (!size) {
-		return NULL;
-	}
-	if (size < 32) {
+	if (size < 32 || size > 0xfffff) {
 		return NULL;
 	}
 	ut8 *b = malloc (size);
@@ -199,6 +195,7 @@ static RCoreSymCacheElement *parseDragons(RBinFile *bf, RBuffer *buf, int off, i
 	int available = r_buf_read_at (buf, off, b, size);
 	if (available != size) {
 		R_LOG_WARN ("r_buf_read_at failed");
+		free (b);
 		return NULL;
 	}
 #if 0
@@ -253,7 +250,7 @@ static RCoreSymCacheElement *parseDragons(RBinFile *bf, RBuffer *buf, int off, i
 	return r_coresym_cache_element_new (bf, buf, off + 16, bits, file_name);
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 #if 0
 	SYMBOLS HEADER
 
@@ -275,12 +272,12 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 	// 0 - magic check, version ...
 	SymbolsHeader sh = parseHeader (buf);
 	if (!sh.valid) {
-		eprintf ("Invalid headers\n");
+		R_LOG_ERROR ("Invalid symbols header");
 		return false;
 	}
 	SymbolsMetadata sm = parseMetadata (buf, 0x40);
 	char * file_name = NULL;
-	if (sm.namelen) {
+	if (sm.namelen > 0 && sm.namelen < 1024) {
 		file_name = calloc (sm.namelen + 1, 1);
 		if (!file_name) {
 			return false;
@@ -289,9 +286,9 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 			return false;
 		}
 	}
-	RCoreSymCacheElement *element = parseDragons (bf, buf, sm.addr + sm.size, sm.bits, file_name);
+	RCoreSymCacheElement *element = parse_dragons (bf, buf, sm.addr + sm.size, sm.bits, file_name);
 	if (element) {
-		*bin_obj = element;
+		bf->bo->bin_obj = element;
 		return true;
 	}
 	free (file_name);
@@ -300,8 +297,8 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 
 static RList *sections(RBinFile *bf) {
 	RList *res = r_list_newf ((RListFree)r_bin_section_free);
-	r_return_val_if_fail (res && bf->o && bf->o->bin_obj, res);
-	RCoreSymCacheElement *element = bf->o->bin_obj;
+	r_return_val_if_fail (res && bf->bo && bf->bo->bin_obj, res);
+	RCoreSymCacheElement *element = bf->bo->bin_obj;
 	size_t i;
 	if (element->segments) {
 		for (i = 0; i < element->hdr->n_segments; i++) {
@@ -346,15 +343,15 @@ static RBinInfo *info(RBinFile *bf) {
 	return ret;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	ut8 buf[4];
 	r_buf_read_at (b, 0, buf, sizeof (buf));
 	return !memcmp (buf, "\x02\xff\x01\xff", 4);
 }
 
 static RList *symbols(RBinFile *bf) {
-	r_return_val_if_fail (bf && bf->o && bf->o->bin_obj, NULL);
-	RCoreSymCacheElement *element = bf->o->bin_obj;
+	r_return_val_if_fail (bf && bf->bo && bf->bo->bin_obj, NULL);
+	RCoreSymCacheElement *element = bf->bo->bin_obj;
 	size_t i;
 	HtUU *hash = ht_uu_new0 ();
 	if (!hash) {
@@ -401,13 +398,13 @@ static ut64 size(RBinFile *bf) {
 }
 
 static void destroy(RBinFile *bf) {
-	r_coresym_cache_element_free (bf->o->bin_obj);
+	r_coresym_cache_element_free (bf->bo->bin_obj);
 }
 
 static void header(RBinFile *bf) {
-	r_return_if_fail (bf && bf->o);
+	r_return_if_fail (bf && bf->bo);
 
-	RCoreSymCacheElement *element = bf->o->bin_obj;
+	RCoreSymCacheElement *element = bf->bo->bin_obj;
 	if (!element) {
 		return;
 	}
@@ -443,11 +440,13 @@ static void header(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_symbols = {
-	.name = "symbols",
-	.desc = "Apple Symbols file",
-	.license = "MIT",
-	.load_buffer = &load_buffer,
-	.check_buffer = &check_buffer,
+	.meta = {
+		.name = "symbols",
+		.desc = "Apple Symbols file",
+		.license = "MIT",
+	},
+	.load = &load,
+	.check = &check,
 	.symbols = &symbols,
 	.sections = &sections,
 	.size = &size,

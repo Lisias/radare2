@@ -20,16 +20,28 @@ jobs:
         name: linux-wasi
         path: radare2-*-wasi.zip
 
+  # Source Tarballs
+  tarball:
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Creating zip and tarball
+      run: sys/tarball.sh
+    - uses: actions/upload-artifact@v3
+      with:
+        name: tarball
+        path: radare2-?.?.?.*
+
   # Linux
   linux-static:
-    if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
     runs-on: ubuntu-20.04
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Installing the musl runtime
       run: |
-        sudo apt-get --assume-yes update
+        sudo apt update --assume-yes
         sudo apt install --assume-yes musl-tools
     - name: Building static r2 with acr
       run: |
@@ -44,14 +56,28 @@ jobs:
         name: linux-static
         path: r2-static.tar.xz
 
+  linux-acr-rpm-64:
+    # if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Packaging for Debian
+      run: make -C dist/rpm
+    - name: Pub
+      uses: actions/upload-artifact@v3
+      with:
+        name: linux-acr-rpm-64
+        path: dist/rpm/*.rpm
   linux-acr-deb-64:
     # if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Packaging for Debian
       run: |
+        gcc -v
         export CFLAGS="-Werror"
         sys/debian.sh
     - name: Pub
@@ -59,15 +85,32 @@ jobs:
       with:
         name: linux-acr-deb-64
         path: dist/debian/*/*.deb
+  linux-acr-deb-arm64:
+    # if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Installing crosscompiler
+      run: |
+        sudo apt update --assume-yes
+        sudo apt install --assume-yes gcc-aarch64-linux-gnu
+    - name: Packaging for Debian
+      run: gcc -v ; sys/debian.sh arm64
+    - name: Pub
+      uses: actions/upload-artifact@v3
+      with:
+        name: linux-acr-deb-arm64
+        path: dist/debian/*/*.deb
 
   linux-acr-deb-32:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Packaging for 32bit Debian
       run: |
-        sudo apt --assume-yes update
+        sudo apt update --assume-yes
         sudo apt install -y gcc-multilib gperf
         export CFLAGS="-m32 -Werror"
         export LDFLAGS=-m32
@@ -81,7 +124,7 @@ jobs:
 
 ## RPM PACKAGES DISABLED
 #  linux-meson-rpm:
-#    runs-on: ubuntu:18.04
+#    runs-on: ubuntu:20.04
 #    container: centos:8
 #    steps:
 #    - name: Checkout
@@ -100,7 +143,7 @@ jobs:
 #        path: RPMS/*/*.rpm *.rpm dist/rpm/*.rpm
 #
 #  centos-meson-rpm:
-#    runs-on: ubuntu:18.04
+#    runs-on: ubuntu:20.04
 #    container: centos:8
 #    steps:
 #    - name: Checkout
@@ -133,10 +176,12 @@ jobs:
 
   # macOS
   macos-acr-x64:
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
     - name: Checkout
       uses: actions/checkout@v3
+    - name: Install pkg-config
+      run: brew install pkg-config
     - name: Packaging
       run: dist/macos/build-pkg.sh
 #    - name: Building Radare2
@@ -150,22 +195,24 @@ jobs:
         name: macos-acr-x64
 
   macos-acr-m1:
-     runs-on: macos-12
-     steps:
-     - name: Checkout
-       uses: actions/checkout@v3
-     - name: Packaging
-       env:
-         ARCHFLAGS: '-arch arm64'
-       run: export CC="gcc -arch arm64" ; dist/macos/build-pkg.sh
-     - name: Pub
-       uses: actions/upload-artifact@v3
-       with:
-         path: dist/macos/*.pkg
-         name: macos-acr-m1
+    runs-on: macos-12
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Install pkg-config with Homebrew
+      run: brew install pkg-config
+    - name: Packaging
+      env:
+        ARCHFLAGS: '-arch arm64'
+      run: export CC="gcc -arch arm64" ; dist/macos/build-pkg.sh
+    - name: Pub
+      uses: actions/upload-artifact@v3
+      with:
+        path: dist/macos/*.pkg
+        name: macos-acr-m1
   ios-cydia32:
     if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
     - uses: actions/checkout@v3
     - name: Install pkg-config/ldid2 with Homebrew
@@ -181,7 +228,7 @@ jobs:
 
   ios-cydia:
     if: contains(github.ref, 'master') || contains(github.ref, 'ci-')
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
     - uses: actions/checkout@v3
     - name: Install pkg-config/ldid2 with Homebrew
@@ -283,23 +330,24 @@ jobs:
     runs-on: windows-2019
     steps:
     - name: Win configure Pagefile
-      uses: al-cheb/configure-pagefile-action@v1.2
+      uses: al-cheb/configure-pagefile-action@v1.3
       with:
           minimum-size: 16GB
           maximum-size: 16GB
           disk-root: "C:"
     - name: Checkout
       uses: actions/checkout@v3
-    - uses: actions/setup-python@v2
-#      with:
-#        python-version: '3.7'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
         pip install ninja r2pipe wget
     - name: Extract r2 version
-      run: echo "##[set-output name=branch;]$( cd sys;python version.py )"
+      shell: bash
+      run: echo "branch=`sys/version.py -n`" >> $GITHUB_OUTPUT
       id: r2v
     - name: Build with meson + ninja
       shell: pwsh
@@ -314,7 +362,7 @@ jobs:
 #        repository: radareorg/radare2-win-installer
 #        path: ./radare2-win-installer
 #    - name: Extract r2 version
-#      run: echo "##[set-output name=branch;]$( python sys\\version.py )"
+#      run: echo "branch=`sys/version.py -n`" >> $GITHUB_OUTPUT
 #      id: extract_version
 #    - name: Create installer
 #      shell: pwsh
@@ -329,16 +377,16 @@ jobs:
     runs-on: windows-2022
     steps:
     - name: Win configure Pagefile
-      uses: al-cheb/configure-pagefile-action@v1.2
+      uses: al-cheb/configure-pagefile-action@v1.3
       with:
           minimum-size: 16GB
           maximum-size: 16GB
           disk-root: "C:"
     - name: Checkout
       uses: actions/checkout@v3
-    - uses: actions/setup-python@v2
-#      with:
-#        python-version: '3.7'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
     - name: Preparing nmake
       uses: ilammy/msvc-dev-cmd@v1
       with:
@@ -373,16 +421,16 @@ jobs:
     runs-on: windows-2019
     steps:
     - name: Win configure Pagefile
-      uses: al-cheb/configure-pagefile-action@v1.2
+      uses: al-cheb/configure-pagefile-action@v1.3
       with:
           minimum-size: 16GB
           maximum-size: 16GB
           disk-root: "C:"
     - name: Checkout
       uses: actions/checkout@v3
-    - uses: actions/setup-python@v2
-#      with:
-#        python-version: '3.7'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
     - name: Preparing nmake
       uses: ilammy/msvc-dev-cmd@v1
       with:
@@ -393,7 +441,8 @@ jobs:
         pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
         pip install ninja r2pipe wget r2env
     - name: Extract r2 version
-      run: echo "##[set-output name=branch;]$( cd sys;python version.py )"
+      shell: bash
+      run: echo "branch=`sys/version.py -n`" >> $GITHUB_OUTPUT
       id: r2v
     - name: Build with meson + ninja
       shell: cmd
@@ -423,16 +472,16 @@ jobs:
     runs-on: windows-2019
     steps:
     - name: Win configure Pagefile
-      uses: al-cheb/configure-pagefile-action@v1.2
+      uses: al-cheb/configure-pagefile-action@v1.3
       with:
           minimum-size: 16GB
           maximum-size: 16GB
           disk-root: "C:"
     - name: Checkout
       uses: actions/checkout@v3
-    - uses: actions/setup-python@v2
-#      with:
-#        python-version: '3.7'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
     - name: Preparing nmake
       uses: ilammy/msvc-dev-cmd@v1
       with:
@@ -443,7 +492,8 @@ jobs:
         pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
         pip install ninja r2pipe wget
     - name: Extract r2 version
-      run: echo "##[set-output name=branch;]$( cd sys; python version.py )"
+      shell: bash
+      run: echo "branch=`sys/version.py -n`" >> $GITHUB_OUTPUT
       id: r2v
     - name: Build with meson + ninja
       shell: pwsh
@@ -504,6 +554,60 @@ jobs:
 #        path: radare2-freebsd.tgz
 
 
+# R2_590 - uncomment after the 590 release
+#  check_abi_compatibility:
+#    needs:
+#      - linux-static
+#    runs-on: ubuntu-latest
+#    defaults:
+#      run:
+#        shell: bash
+#        working-directory: /tmp
+#    steps:
+#    - name: Install dependencies
+#      run: |
+#        # sudo apt install --assume-yes abigail-tools wget
+#        # ubuntu-latest is TOO OLD and it ships abigail 2.0 which is known to be buggy
+#        wget https://ftp.fau.de/debian/pool/main/liba/libabigail/libabigail0_2.2-2_amd64.deb
+#        sudo dpkg -i libabigail0_2.2-2_amd64.deb
+#        wget https://ftp.fau.de/debian/pool/main/liba/libabigail/libabigail-dev_2.2-2_amd64.deb
+#        sudo dpkg -i libabigail-dev_2.2-2_amd64.deb
+#        wget https://ftp.fau.de/debian/pool/main/liba/libabigail/abigail-tools_2.2-2_amd64.deb
+#        sudo dpkg -i abigail-tools_2.2-2_amd64.deb
+#    - name: Download Build
+#      uses: actions/download-artifact@v3
+#      with:
+#        name: linux-static
+#        path: /tmp
+#    - name: Download latest release
+#      run: |
+#        DOWNLOAD_URL=$(curl -s \
+#        --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+#        https://api.github.com/repos/radareorg/radare2/releases/latest \
+#        | jq -r '.assets[] | select(.name | startswith("radare2")) | select(.name | endswith("static.tar.xz")) | .browser_download_url')
+#        wget -O r2-static-latest.tar.xz $DOWNLOAD_URL
+#    - name: Untar
+#      run: |
+#        mkdir r2-static
+#        tar -xvf r2-static.tar.xz -C r2-static --strip-components=1
+#        mkdir r2-static-latest
+#        tar -xvf r2-static-latest.tar.xz -C r2-static-latest --strip-components=1
+#    - name: ABI compatibility check
+#      run: |
+#        A=abidiff.conf
+#        echo '[suppress_function]' > $A
+#        echo 'name_regexp = .*java.*' >> $A
+#        echo '[suppress_function]' >> $A
+#        echo 'name_not_regexp = ^r_.*' >> $A
+#        echo '[suppress_function]' >> $A
+#        echo 'name_regexp = r_bin_add_import' >> $A
+#        echo '[suppress_variable]' >> $A
+#        echo 'name_not_regexp = ^r_.*' >> $A
+#        for lib in r2-static-latest/usr/lib/libr_*.so; do
+#          echo $lib ; abidiff --suppr $A ${lib} r2-static/usr/lib/$(basename ${lib});
+#        done
+
+
   # Release creation
   check_release:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
@@ -512,6 +616,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag }}
     needs:
       - linux-acr-deb-64
+      - linux-acr-deb-arm64
       - linux-acr-deb-32
       - w64-static
       - w64-meson
@@ -524,8 +629,6 @@ jobs:
       - android-acr-arm
       - android-acr-aarch64
       - linux-static
-      - linux-acr-deb-64
-      - linux-acr-deb-32
       - linux-wasi
 #      - freebsd
 #      - android-meson
@@ -536,7 +639,14 @@ jobs:
         with:
           fetch-depth: 0 # Download all git history and tags
       - name: Check if is a release
-        run: git describe --exact-match --tags ${{ github.sha }} | awk 'BEGIN{tag="-";r="no"}/^[0-9]+\.[0-9]+/{tag=$0;r="yes"};END{print "::set-output name=is::"r;print "::set-output name=tag::"tag}'
+        run: |
+          TAG="`git describe --exact-match --tags ${{ github.sha }} || true`"
+          if [ -n "$TAG" ]; then
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "is=yes" >> $GITHUB_OUTPUT
+          else
+            echo "is=no" >> $GITHUB_OUTPUT
+          fi
         id: release
 
   release:
@@ -550,7 +660,8 @@ jobs:
         with:
           fetch-depth: 0 # Download all git history and tags
       - name: Extract r2 version
-        run: echo "##[set-output name=branch;]$( cd sys;python version.py )"
+        shell: bash
+        run: echo "branch=`sys/version.py -n`" >> $GITHUB_OUTPUT
         id: r2v
       - name: Prepare release notes
         run: ./sys/release-notes.sh | tee ./RELEASE_NOTES.md
@@ -578,6 +689,33 @@ jobs:
           asset_path: dist/artifacts/linux-acr-deb-64/radare2/radare2_${{ steps.r2v.outputs.branch }}_amd64.deb
           asset_name: radare2_${{ steps.r2v.outputs.branch }}_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
+      - name: Upload asset for Debian (arm64)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/artifacts/linux-acr-deb-arm64/radare2/radare2_${{ steps.r2v.outputs.branch }}_arm64.deb
+          asset_name: radare2_${{ steps.r2v.outputs.branch }}_arm64.deb
+          asset_content_type: application/vnd.debian.binary-package
+      - name: Upload prefetched tarball (source)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/artifacts/tarball/radare2-${{ steps.r2v.outputs.branch }}.tar.xz
+          asset_name: radare2-${{ steps.r2v.outputs.branch }}.tar.xz
+          asset_content_type: application/x-txz
+      - name: Upload prefetched zip (source)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/artifacts/tarball/radare2-${{ steps.r2v.outputs.branch }}.zip
+          asset_name: radare2-${{ steps.r2v.outputs.branch }}.zip
+          asset_content_type: application/x-zip
       - name: Upload asset for Debian (i386)
         uses: actions/upload-release-asset@v1
         env:

@@ -7,7 +7,7 @@
 #include <r_cons.h>
 #include <r_debug.h>
 
-#if DEBUGGER && (__linux__ || __BSD__ || defined(__serenity__))
+#if DEBUGGER && (__linux__ || R2__BSD__ || defined(__serenity__))
 
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -228,7 +228,6 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 #else
 			switch (errno) {
 			case EPERM:
-				ret = pid;
 				R_LOG_ERROR ("ptrace_attach: Operation not permitted");
 				break;
 			case EINVAL:
@@ -241,7 +240,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 			return NULL;
 #endif
 		} else if (__waitpid (pid)) {
-			ret = pid;
+			/*Do Nothing*/
 		} else {
 			R_LOG_ERROR ("waitpid");
 			return NULL;
@@ -343,9 +342,11 @@ static int __getpid(RIODesc *fd) {
 
 // TODO: rename ptrace to io_ptrace .. err io.ptrace ??
 RIOPlugin r_io_plugin_ptrace = {
-	.name = "ptrace",
-	.desc = "Ptrace and /proc/pid/mem (if available) io plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "ptrace",
+		.desc = "Ptrace and /proc/pid/mem (if available) io plugin",
+		.license = "LGPL3",
+	},
 	.uris = "ptrace://,attach://",
 	.open = __open,
 	.close = __close,
@@ -360,7 +361,9 @@ RIOPlugin r_io_plugin_ptrace = {
 };
 #else
 struct r_io_plugin_t r_io_plugin_ptrace = {
-	.name = NULL
+	.meta = {
+		.name = NULL
+	},
 };
 #endif
 

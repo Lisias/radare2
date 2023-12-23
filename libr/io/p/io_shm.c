@@ -5,8 +5,8 @@
 #include <sys/types.h>
 
 #if __ANDROID__ || EMSCRIPTEN
-#undef __UNIX__
-#define __UNIX__ 0
+#undef R2__UNIX__
+#define R2__UNIX__ 0
 #endif
 
 // linux requires -lrt for this, but still it seems to not work as expected
@@ -14,7 +14,7 @@
 // make this work across all unixes without adding extra depenencies
 #define USE_SHM_OPEN 0
 
-#if __UNIX__ && !defined (__QNX__) && !defined (__HAIKU__)
+#if R2__UNIX__ && !defined (__QNX__) && !defined (__HAIKU__)
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/mman.h>
@@ -130,11 +130,13 @@ static RIODesc *shm__open(RIO *io, const char *pathname, int rw, int mode) {
 }
 
 RIOPlugin r_io_plugin_shm = {
-	.name = "shm",
-	.desc = "Shared memory resources plugin",
+	.meta = {
+		.name = "shm",
+		.desc = "Shared memory resources plugin",
+		.license = "MIT",
+		.author = "pancake",
+	},
 	.uris = "shm://",
-	.license = "MIT",
-	.author = "pancake",
 	.open = shm__open,
 	.close = shm__close,
 	.read = shm__read,
@@ -145,8 +147,10 @@ RIOPlugin r_io_plugin_shm = {
 
 #else
 RIOPlugin r_io_plugin_shm = {
-	.name = "shm",
-	.desc = "shared memory resources (not for this platform)",
+	.meta = {
+		.name = "shm",
+		.desc = "shared memory resources (not for this platform)",
+	}
 };
 #endif
 

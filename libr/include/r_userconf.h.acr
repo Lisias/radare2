@@ -7,6 +7,7 @@ extern "C" {
 
 #include "r_version.h"
 
+#define WANT_DEBUGSTUFF @WANT_DEBUGSTUFF@
 #define R_CHECKS_LEVEL @R_CHECKS_LEVEL@
 #define R_CRITICAL_ENABLED @R_CRITICAL_ENABLED@
 #define DEBUGGER @DEBUGGER@
@@ -18,6 +19,18 @@ extern "C" {
 #define HAVE_SIGACTION @HAVE_SIGACTION@
 #define WANT_THREADS @WANT_THREADS@
 #define WANT_CAPSTONE @WANT_CAPSTONE@
+#define HAVE_LINUX_CAN_H @HAVE_LINUX_CAN_H@
+
+#define R_BUILDSYSTEM "@R2_BUILDSYSTEM@"
+#if @USE_CS4@ == 1
+#define R2_CSVERSION 4
+#elif @USE_CSNEXT@ == 1
+#define R2_CSVERSION 6
+#else
+#define R2_CSVERSION 5
+#endif
+
+#define WITH_STATIC_THEMES @WITH_STATIC_THEMES@
 
 #define HAVE_GPERF @HAVE_GPERF@
 #if (HAVE_GPERF) == 1
@@ -44,7 +57,7 @@ extern "C" {
 #define R2_FLAGS "@FLAGS@"
 #define R2_HUD "@HUD@"
 #else
-#if __WINDOWS__ || _MSC_VER
+#if R2__WINDOWS__ || _MSC_VER
 #define R2_PREFIX "."
 #define R2_ETCDIR "etc"
 #define R2_LIBDIR "lib"
@@ -88,6 +101,10 @@ extern "C" {
 
 #ifndef HAVE_LIB_SSL
 #define HAVE_LIB_SSL @HAVE_OPENSSL@
+#endif
+
+#ifndef WANT_SSL_CRYPTO
+#define WANT_SSL_CRYPTO @WANT_SSL_CRYPTO@
 #endif
 
 #define HAVE_LIBUV @HAVE_LIBUV@

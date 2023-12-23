@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2022 - pancake */
+/* radare2 - LGPL - Copyright 2009-2023 - pancake */
 
 #include "r_core.h"
 #include "config.h"
@@ -8,10 +8,14 @@
 		struct r_ ## x ## _plugin_t *hand = (struct r_ ## x ## _plugin_t *)data;\
 		RCore *core = (RCore *) user;\
 		pl->free = NULL; \
-		r_ ## x ## _add (core->y, hand);\
+		r_ ## x ## _plugin_add (core->y, hand);\
 		return true;\
 	}\
-	static int __lib_ ## x ## _dt (RLibPlugin * pl, void *p, void *u) { return true; }
+	static int __lib_ ## x ## _dt (RLibPlugin * pl, void *user, void *data) { \
+		struct r_ ## x ## _plugin_t *hand = (struct r_ ## x ## _plugin_t *)data; \
+		RCore *core = (RCore *) user; \
+		return r_ ## x ## _plugin_remove (core->y, hand); \
+	}
 
 // TODO: deprecate this
 #define CB_COPY(x, y)\
@@ -21,36 +25,32 @@
 		RCore *core = (RCore *) user;\
 		instance = R_NEW (struct r_ ## x ## _plugin_t);\
 		memcpy (instance, hand, sizeof (struct r_ ## x ## _plugin_t));\
-		r_ ## x ## _add (core->y, instance);\
+		r_ ## x ## _plugin_add (core->y, instance);\
 		return true;\
 	}\
-	static int __lib_ ## x ## _dt (RLibPlugin * pl, void *p, void *u) { return true; }
+	static int __lib_ ## x ## _dt (RLibPlugin *pl, void *user, void *data) { \
+		struct r_ ## x ## _plugin_t *hand = (struct r_ ## x ## _plugin_t *)data; \
+		RCore *core = (RCore *) user; \
+		return r_ ## x ## _plugin_remove (core->y, hand); \
+	}
 
-// XXX api consistency issues
-#define r_io_add r_io_plugin_add
 CB_COPY (io, io)
-#define r_core_add r_core_plugin_add
 CB (core, rcmd)
-#define r_debug_add r_debug_plugin_add
 CB (debug, dbg)
-#define r_bp_add r_bp_plugin_add
 CB (bp, dbg->bp)
 CB (lang, lang)
 CB (anal, anal)
-#define r_anal_esil_add r_anal_esil_plugin_add
-CB (anal_esil, anal->esil)
-CB (asm, rasm)
+CB (esil, anal->esil)
 CB (parse, parser)
 CB (bin, bin)
 CB (egg, egg)
 CB (fs, fs)
+CB (arch, anal->arch);
 
-static void __openPluginsAt(RCore *core, const char *arg, const char *user_path) {
-	if (arg && *arg) {
-		if (user_path) {
-			if (r_str_endswith (user_path, arg)) {
-				return;
-			}
+static void open_plugins_at(RCore *core, const char *arg, const char *user_path) {
+	if (R_STR_ISNOTEMPTY (arg)) {
+		if (user_path && r_str_endswith (user_path, arg)) {
+			return;
 		}
 		char *pdir = r_str_r2_prefix (arg);
 		if (pdir) {
@@ -74,7 +74,7 @@ static void __loadSystemPlugins(RCore *core, int where, const char *path) {
 	}
 	if (where & R_CORE_LOADLIBS_ENV) {
 		char *p = r_sys_getenv (R_LIB_ENV);
-		if (p && *p) {
+		if (R_STR_ISNOTEMPTY (p)) {
 			r_lib_opendir (core->lib, p);
 		}
 		free (p);
@@ -87,9 +87,9 @@ static void __loadSystemPlugins(RCore *core, int where, const char *path) {
 		}
 	}
 	if (where & R_CORE_LOADLIBS_SYSTEM) {
-		__openPluginsAt (core, R2_PLUGINS, dir_plugins);
-		__openPluginsAt (core, R2_EXTRAS, dir_plugins);
-		__openPluginsAt (core, R2_BINDINGS, dir_plugins);
+		open_plugins_at (core, R2_PLUGINS, dir_plugins);
+		open_plugins_at (core, R2_EXTRAS, dir_plugins);
+		open_plugins_at (core, R2_BINDINGS, dir_plugins);
 	}
 #endif
 }
@@ -104,28 +104,31 @@ R_API void r_core_loadlibs_init(RCore *core) {
 	DF (BP, "debugger breakpoint plugins", bp);
 	DF (LANG, "language plugins", lang);
 	DF (ANAL, "analysis plugins", anal);
-	DF (ESIL, "esil emulation plugins", anal_esil);
-	DF (ASM, "(dis)assembler plugins", asm);
+	DF (ESIL, "esil emulation plugins", esil);
+	// DF (ASM, "(dis)assembler plugins", asm);
 	DF (PARSE, "parsing plugins", parse);
 	DF (BIN, "bin plugins", bin);
 	DF (EGG, "egg plugins", egg);
 	DF (FS, "fs plugins", fs);
+	DF (ARCH, "arch plugins", arch);
 	core->times->loadlibs_init_time = r_time_now_mono () - prev;
 }
 
-static bool __isScriptFilename(const char *name) {
+static bool is_script(const char *name) {
 	const char *ext = r_file_extension (name);
 	if (ext) {
 		if (0
 		|| !strcmp (ext, "c")
 		|| !strcmp (ext, "go")
+		|| !strcmp (ext, "ts")
 		|| !strcmp (ext, "js")
+		|| !strcmp (ext, "qjs")
 		|| !strcmp (ext, "lua")
 		|| !strcmp (ext, "pl")
 		|| !strcmp (ext, "py")
-		|| !strcmp (ext, "qjs")
 		|| !strcmp (ext, "rs")
 		|| !strcmp (ext, "v")
+		|| !strcmp (ext, "nim")
 		|| !strcmp (ext, "vala")
 		|| !strcmp (ext, "wren")) {
 			return true;
@@ -148,8 +151,13 @@ R_API bool r_core_loadlibs(RCore *core, int where, const char *path) {
 	RListIter *iter;
 	char *file;
 	r_list_foreach (files, iter, file) {
-		if (__isScriptFilename (file)) {
-			r_core_cmdf (core, "\". %s/%s\"", homeplugindir, file);
+		if (is_script (file)) {
+			// r_core_cmdf (core, "\"\". %s/%s", homeplugindir, file);
+			char *script_file = r_str_newf ("%s/%s", homeplugindir, file);
+			if (!r_core_run_script (core, script_file)) {
+				R_LOG_ERROR ("Failed to run script '%s'", script_file);
+			}
+			free (script_file);
 		}
 	}
 	r_list_free (files);

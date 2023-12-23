@@ -249,7 +249,7 @@ R_API void r_xml_free(RXml *x) {
 R_API RXmlRet r_xml_parse(RXml *x, int _ch) {
 	/* Ensure that characters are in the range of 0..255 rather than -126..125.
 	 * All character comparisons are done with positive integers. */
-	ut8 ch = (ut8 )(_ch + 256) & 0xff;
+	ut32 ch = (ut32)(_ch + 256) & 0xff;
 	if (!ch) {
 		return R_XML_ESYN;
 	}
@@ -1001,4 +1001,54 @@ R_API RXmlRet r_xml_parse(RXml *x, int _ch) {
 
 R_API RXmlRet r_xml_eof(RXml *x) {
 	return (x->state == R_XML_STATE_MISC3)? R_XML_OK: R_XML_EEOF;
+}
+
+R_API char *r_xml_indent(const char *s) {
+	RStrBuf *sb = r_strbuf_new ("");
+	int level = -1;
+	bool open = false;
+	bool klose = false;
+	bool fin = false;
+	const char *os = s;
+	while (*s) {
+		if (open) {
+			if (*s == '>') {
+				open = false;
+				fin = true;
+				level++;
+			}
+		} else {
+			if (*s == '<') {
+				if (s[1] == '/') {
+					klose = true;
+					level--;
+				}
+				open = true;
+				size_t len = s - os;
+				r_strbuf_append_n (sb, os, len);
+				r_strbuf_append (sb, "\n");
+				os = s;
+			}
+		}
+		s = r_str_trim_head_ro (s + 1);
+		if (fin) {
+			size_t len = s - os;
+			int i;
+			for (i = 0; i < level; i++) {
+				r_strbuf_append (sb, "  ");
+			}
+			r_strbuf_append_n (sb, os, len);
+			r_strbuf_append (sb, "\n");
+			if (klose) {
+				klose = false;
+				level --;
+			}
+			for (i = 0; i < level; i++) {
+				r_strbuf_append (sb, "  ");
+			}
+			os = s;
+			fin = false;
+		}
+	}
+	return r_strbuf_drain (sb);
 }

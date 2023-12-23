@@ -7,8 +7,8 @@ R2DEPS+=r_crypto
 R2DEPS+=r_cons
 STATIC_OBJS=$(subst ..,p/..,$(subst io_,p/io_,$(STATIC_OBJ)))
 OBJS=${STATIC_OBJS}
-OBJS+=io.o io_plugin.o io_map.o io_desc.o io_cache.o p_cache.o undo.o ioutils.o io_fd.o io_memory.o
-OBJS+=io_bank.o io_submap.o
+OBJS+=io.o io_plugin.o io_map.o io_desc.o io_cache.o p_cache.o io_stream.o
+OBJS+=io_bank.o io_submap.o undo.o ioutils.o io_fd.o io_memory.o
 
 CFLAGS+=-Wall -DR2_PLUGIN_INCORE
 
@@ -27,7 +27,7 @@ ifeq (${BUILD_OS},dragonfly)
 endif
 
 .PHONY: pre pos
-pre: libr_io.${EXT_SO} libr_io.${EXT_AR}
+pre: libr_io.$(EXT_SO) libr_io.$(EXT_AR)
 	@$(MAKE) -C p
 	$(MAKE) pos
 

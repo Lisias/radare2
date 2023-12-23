@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2022 - pancake */
+/* radare - LGPL - Copyright 2011-2023 - pancake */
 
 #include <r_bin.h>
 #include "i/private.h"
@@ -29,7 +29,7 @@ R_API void r_bin_demangle_list(RBin *bin) {
 	}
 	r_list_foreach (bin->plugins, it, plugin) {
 		if (plugin->demangle) {
-			bin->cb_printf ("%s\n", plugin->name);
+			bin->cb_printf ("%s\n", plugin->meta.name);
 		}
 	}
 }
@@ -39,7 +39,7 @@ R_API char *r_bin_demangle_plugin(RBin *bin, const char *name, const char *str) 
 	RListIter *it;
 	if (bin && name && str) {
 		r_list_foreach (bin->plugins, it, plugin) {
-			if (plugin->demangle && !strncmp (plugin->name, name, strlen (plugin->name))) {
+			if (plugin->demangle && !strncmp (plugin->meta.name, name, strlen (plugin->meta.name))) {
 				return plugin->demangle (str);
 			}
 		}
@@ -48,7 +48,7 @@ R_API char *r_bin_demangle_plugin(RBin *bin, const char *name, const char *str) 
 }
 
 R_API int r_bin_demangle_type(const char *str) {
-	if (str && *str) {
+	if (R_STR_ISNOTEMPTY (str)) {
 		if (!strcmp (str, "swift")) {
 			return R_BIN_LANG_SWIFT;
 		}
@@ -93,17 +93,17 @@ R_API char *r_bin_demangle(RBinFile *bf, const char *def, const char *str, ut64 
 	}
 	RBin *bin = bf? bf->rbin: NULL;
 	bool trylib = bin? bin->demangle_trylib: true;
-	RBinObject *o = bf? bf->o: NULL;
+	RBinObject *o = bf? bf->bo: NULL;
 	RListIter *iter;
 	const char *lib = NULL;
-	if (!strncmp (str, "reloc.", 6)) {
-		str += 6;
+	if (r_str_startswith (str, "reloc.")) {
+		str += strlen ("reloc.");
 	}
-	if (!strncmp (str, "sym.", 4)) {
-		str += 4;
+	if (r_str_startswith (str, "sym.")) {
+		str += strlen ("sym.");
 	}
-	if (!strncmp (str, "imp.", 4)) {
-		str += 4;
+	if (r_str_startswith (str, "imp.")) {
+		str += strlen ("imp.");
 	}
 	if (o && libs) {
 		bool found = false;
@@ -129,12 +129,24 @@ R_API char *r_bin_demangle(RBinFile *bf, const char *def, const char *str, ut64 
 			}
 		}
 	}
-	if (!strncmp (str, "__", 2)) {
+	if (r_str_startswith (str, "So") && isdigit (str[2])) {
+		char *ss = r_str_newf ("$s%s", str);
+		char *res = r_bin_demangle (bf, def, ss, vaddr, libs);
+		free (ss);
+		return res;
+	}
+	if (r_str_startswith (str, "_symbolic")) {
+		type = R_BIN_LANG_SWIFT;
+	}
+	if (r_str_startswith (str, "__")) {
 		if (str[2] == 'T') {
 			type = R_BIN_LANG_SWIFT;
 		} else {
-			type = R_BIN_LANG_CXX;
-		//	str++;
+			if (type == -1 && str[2] == 's') {
+				type = R_BIN_LANG_SWIFT;
+			} else {
+				type = R_BIN_LANG_CXX;
+			}
 		}
 	}
 	// if str is sym. or imp. when str+=4 str points to the end so just return
@@ -144,6 +156,7 @@ R_API char *r_bin_demangle(RBinFile *bf, const char *def, const char *str, ut64 
 	if (type == -1) {
 		type = r_bin_lang_type (bf, def, str);
 	}
+	// type = R_BIN_LANG_SWIFT;
 	char *demangled = NULL;
 	switch (type) {
 	case R_BIN_LANG_JAVA: demangled = r_bin_demangle_java (str); break;

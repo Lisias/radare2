@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2021 - pancake */
+/* radare - LGPL - Copyright 2009-2023 - pancake */
 
 #include <r_userconf.h>
 
@@ -28,7 +28,7 @@
 #endif
 
 #if __KFBSD__
-static void addr_to_string(struct sockaddr_storage *ss, char *buffer, int buflen) {
+static void addr_tostring(struct sockaddr_storage *ss, char *buffer, int buflen) {
 	char buffer2[INET6_ADDRSTRLEN];
 	struct sockaddr_in6 *sin6;
 	struct sockaddr_in *sin;
@@ -103,7 +103,7 @@ int bsd_handle_signals(RDebug *dbg) {
 #endif
 }
 
-int bsd_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
+bool bsd_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
 	int r = -1;
 	switch (type) {
 		case R_REG_TYPE_GPR:
@@ -112,15 +112,16 @@ int bsd_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
 			break;
 		case R_REG_TYPE_DRX:
 #if __KFBSD__ || __NetBSD__
+#ifdef PT_SETDBREGS
 			r = ptrace (PT_SETDBREGS, dbg->pid, (caddr_t)buf, sizeof (struct dbreg));
+#endif
 #endif
 			break;
 		case R_REG_TYPE_FPU:
 			r = ptrace (PT_SETFPREGS, dbg->pid, (caddr_t)buf, sizeof (struct fpreg));
 			break;
 	}
-
-	return (r == 0 ? true : false);
+	return r == 0;
 }
 
 RDebugInfo *bsd_info(RDebug *dbg, const char *arg) {
@@ -462,13 +463,13 @@ RList *bsd_desc_list(int pid) {
 				struct sockaddr_un *sun =
 					(struct sockaddr_un *)&kve->kf_sa_local;
 				if (sun->sun_path[0] != 0)
-					addr_to_string (&kve->kf_sa_local, path, sizeof (path));
+					addr_tostring (&kve->kf_sa_local, path, sizeof (path));
 				else
-					addr_to_string (&kve->kf_sa_peer, path, sizeof (path));
+					addr_tostring (&kve->kf_sa_peer, path, sizeof (path));
 			} else {
-				addr_to_string (&kve->kf_sa_local, path, sizeof (path));
+				addr_tostring (&kve->kf_sa_local, path, sizeof (path));
 				strcat (path, " ");
-				addr_to_string (&kve->kf_sa_peer, path + strlen (path),
+				addr_tostring (&kve->kf_sa_peer, path + strlen (path),
 						sizeof (path));
 			}
 #else
@@ -476,13 +477,13 @@ RList *bsd_desc_list(int pid) {
 				struct sockaddr_un *sun =
 					(struct sockaddr_un *)&kve->kf_un.kf_sock.kf_sa_local;
 				if (sun->sun_path[0] != 0)
-					addr_to_string (&kve->kf_un.kf_sock.kf_sa_local, path, sizeof (path));
+					addr_tostring (&kve->kf_un.kf_sock.kf_sa_local, path, sizeof (path));
 				else
-					addr_to_string (&kve->kf_un.kf_sock.kf_sa_peer, path, sizeof (path));
+					addr_tostring (&kve->kf_un.kf_sock.kf_sa_peer, path, sizeof (path));
 			} else {
-				addr_to_string (&kve->kf_un.kf_sock.kf_sa_local, path, sizeof (path));
+				addr_tostring (&kve->kf_un.kf_sock.kf_sa_local, path, sizeof (path));
 				strcat (path, " ");
-				addr_to_string (&kve->kf_un.kf_sock.kf_sa_peer, path + strlen (path),
+				addr_tostring (&kve->kf_un.kf_sock.kf_sa_peer, path + strlen (path),
 						sizeof (path));
 			}
 #endif

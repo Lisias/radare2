@@ -1,15 +1,10 @@
-/* radare - LGPL - Copyright 2009-2022 - pancake */
+/* radare - LGPL - Copyright 2009-2023 - pancake */
 
 #define R_LOG_ORIGIN "rafind2"
 
 #include <r_main.h>
-#include <r_types.h>
 #include <r_search.h>
-#include <r_util.h>
 #include <r_util/r_print.h>
-#include <r_cons.h>
-#include <r_lib.h>
-#include <r_io.h>
 
 typedef struct {
 	RIO *io;
@@ -44,6 +39,8 @@ static void rafind_options_fini(RafindOptions *ro) {
 		ro->io = NULL;
 		free (ro->buf);
 		ro->cur = 0;
+		r_list_free (ro->keywords);
+		ro->keywords = NULL;
 	}
 }
 
@@ -183,6 +180,7 @@ static int show_help(const char *argv0, int line) {
 	" -M [str]   set a binary mask to be applied on keywords\n"
 	" -n         do not stop on read errors\n"
 	" -r         print using radare commands\n"
+	// " -R         replace in place every search hit with the given argument\n"
 	" -s [str]   search for a string (more than one string can be passed)\n"
 	" -S [str]   search for a wide string (more than one string can be passed).\n"
 	" -t [to]    stop search at address 'to'\n"
@@ -336,7 +334,6 @@ err:
 	free (efile);
 	r_io_free (io);
 	r_search_free (rs);
-	rafind_options_fini (ro);
 	return result;
 }
 
@@ -383,12 +380,14 @@ static int rafind_open(RafindOptions *ro, const char *file) {
 R_API int r_main_rafind2(int argc, const char **argv) {
 	int c;
 	const char *file = NULL;
-	RafindOptions ro;
-	rafind_options_init (&ro);
 
 	if (argc < 1) {
 		return show_help (argv[0], 0);
 	}
+
+	RafindOptions ro;
+	rafind_options_init (&ro);
+
 	RGetopt opt;
 	r_getopt_init (&opt, argc, argv, "a:ie:b:cjmM:s:S:x:Xzf:F:t:E:rqnhvZLV:");
 	while ((c = r_getopt_next (&opt)) != -1) {
@@ -442,6 +441,7 @@ R_API int r_main_rafind2(int argc, const char **argv) {
 			{
 			int bs = (int)r_num_math (NULL, opt.arg);
 			if (bs < 2) {
+				rafind_options_fini (&ro);
 				R_LOG_ERROR ("Invalid blocksize <= 1");
 				return 1;
 			}
@@ -520,6 +520,7 @@ R_API int r_main_rafind2(int argc, const char **argv) {
 					break;
 				default:
 					R_LOG_ERROR ("Invalid value size. Must be 1, 2, 4 or 8");
+					rafind_options_fini (&ro);
 					return 1;
 				}
 				char *hexdata = r_hex_bin2strdup ((ut8*)buf, size);
@@ -533,8 +534,10 @@ R_API int r_main_rafind2(int argc, const char **argv) {
 			}
 			break;
 		case 'v':
+			rafind_options_fini (&ro);
 			return r_main_version_print ("rafind2");
 		case 'h':
+			rafind_options_fini (&ro);
 			return show_help (argv[0], 0);
 		case 'z':
 			ro.mode = R_SEARCH_STRING;

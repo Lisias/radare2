@@ -1,20 +1,11 @@
-/* radare - LGPL - Copyright 2009-2021 - pancake */
+/* radare - LGPL - Copyright 2009-2023 - pancake */
 
 #include <r_cons.h>
-#include <string.h>
-#if __UNIX__
-#include <errno.h>
-#endif
 
 #define I r_cons_singleton ()
 
-// TODO: Support binary, use RBuffer and remove globals
-static char *readbuffer = NULL;
-static int readbuffer_length = 0;
-static bool bufactive = true;
-
 #if 0
-//__UNIX__
+//R2__UNIX__
 #include <poll.h>
 static int __is_fd_ready(int fd) {
 	fd_set rfds;
@@ -33,7 +24,7 @@ static int __is_fd_ready(int fd) {
 #endif
 
 R_API int r_cons_controlz(int ch) {
-#if __UNIX__
+#if R2__UNIX__
 	if (ch == 0x1a) {
 		r_cons_show_cursor (true);
 		r_cons_enable_mouse (false);
@@ -92,7 +83,7 @@ static int __parseMouseEvent(void) {
 }
 
 R_API int r_cons_arrow_to_hjkl(int ch) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	if (I->vtmode != 2) {
 		if (I->is_arrow) {
 			switch (ch) {
@@ -342,6 +333,11 @@ R_API int r_cons_arrow_to_hjkl(int ch) {
 	return ch;
 }
 
+#if 0
+#define P(x) fwrite ((x), strlen ((x)), 1, stdout);fflush(stdout);
+#else
+#define P(x) write (1, (x), strlen ((x)));
+#endif
 // XXX no control for max length here?!?!
 R_API int r_cons_fgets(char *buf, int len, int argc, const char **argv) {
 #define RETURN(x) { ret=x; goto beach; }
@@ -360,32 +356,30 @@ R_API int r_cons_fgets(char *buf, int len, int argc, const char **argv) {
 	if (cons->user_fgets) {
 		RETURN (cons->user_fgets (buf, len));
 	}
-	printf ("%s", cons->line->prompt);
-	fflush (stdout);
+	const char *prompt = cons->line->prompt;
+	P (prompt);
 	*buf = '\0';
 	if (color) {
 		const char *p = cons->context->pal.input;
 		if (R_STR_ISNOTEMPTY (p)) {
-			fwrite (p, strlen (p), 1, stdout);
-			fflush (stdout);
+			P(p);
 		}
 	}
 	if (!fgets (buf, len, cons->fdin)) {
 		if (color) {
-			printf (Color_RESET);
-			fflush (stdout);
+			P(Color_RESET);
 		}
 		RETURN (-1);
 	}
 	if (feof (cons->fdin)) {
 		if (color) {
-			printf (Color_RESET);
+			P(Color_RESET);
 		}
 		RETURN (-2);
 	}
 	r_str_trim_tail (buf);
 	if (color) {
-		printf (Color_RESET);
+		P (Color_RESET);
 	}
 	ret = strlen (buf);
 beach:
@@ -394,7 +388,7 @@ beach:
 }
 
 R_API int r_cons_any_key(const char *msg) {
-	if (msg && *msg) {
+	if (R_STR_ISNOTEMPTY (msg)) {
 		r_cons_printf ("\n-- %s --\n", msg);
 	} else {
 		r_cons_print ("\n--press any key--\n");
@@ -405,7 +399,7 @@ R_API int r_cons_any_key(const char *msg) {
 
 extern void resizeWin(void);
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 static int __cons_readchar_w32(ut32 usec) {
 	int ch = 0;
 	BOOL ret;
@@ -556,62 +550,70 @@ static int __cons_readchar_w32(ut32 usec) {
 }
 #endif
 
-R_API int r_cons_readchar_timeout(ut32 usec) {
-#if __UNIX__
+R_API int r_cons_readchar_timeout(ut32 msec) {
+#if R2__UNIX__
 	struct timeval tv;
 	fd_set fdset, errset;
 	FD_ZERO (&fdset);
 	FD_ZERO (&errset);
 	FD_SET (0, &fdset);
-	tv.tv_sec = 0; // usec / 1000;
-	tv.tv_usec = 1000 * usec;
-	r_cons_set_raw (1);
+	ut32 secs = msec / 1000;
+	tv.tv_sec = secs;
+	ut32 usec = (msec - secs) * 1000;
+	tv.tv_usec = usec;
+	r_cons_set_raw (true);
 	if (select (1, &fdset, NULL, &errset, &tv) == 1) {
 		return r_cons_readchar ();
 	}
-	r_cons_set_raw (0);
+	r_cons_set_raw (false);
 	// timeout
 	return -1;
 #else
-	return  __cons_readchar_w32 (usec);
+	return  __cons_readchar_w32 (msec);
 #endif
 }
 
 R_API bool r_cons_readpush(const char *str, int len) {
-	char *res = (len + readbuffer_length > 0) ? realloc (readbuffer, len + readbuffer_length) : NULL;
+	InputState *input_state = r_cons_input_state ();
+	char *res = (len + input_state->readbuffer_length > 0)
+		? realloc (input_state->readbuffer, len + input_state->readbuffer_length)
+		: NULL;
 	if (res) {
-		readbuffer = res;
-		memmove (readbuffer + readbuffer_length, str, len);
-		readbuffer_length += len;
+		input_state->readbuffer = res;
+		memmove (input_state->readbuffer + input_state->readbuffer_length, str, len);
+		input_state->readbuffer_length += len;
 		return true;
 	}
 	return false;
 }
 
 R_API void r_cons_readflush(void) {
-	R_FREE (readbuffer);
-	readbuffer_length = 0;
+	InputState *input_state = r_cons_input_state ();
+	R_FREE (input_state->readbuffer);
+	input_state->readbuffer_length = 0;
 }
 
 R_API void r_cons_switchbuf(bool active) {
-	bufactive = active;
+	InputState *input_state = r_cons_input_state ();
+	input_state->bufactive = active;
 }
 
-#if !__WINDOWS__
+#if !R2__WINDOWS__
 extern volatile sig_atomic_t sigwinchFlag;
 #endif
 
 R_API int r_cons_readchar(void) {
 	char buf[2];
 	buf[0] = -1;
-	if (readbuffer_length > 0) {
-		int ch = *readbuffer;
-		readbuffer_length--;
-		memmove (readbuffer, readbuffer + 1, readbuffer_length);
+	InputState *input_state = r_cons_input_state ();
+	if (input_state->readbuffer_length > 0) {
+		int ch = *input_state->readbuffer;
+		input_state->readbuffer_length--;
+		memmove (input_state->readbuffer, input_state->readbuffer + 1, input_state->readbuffer_length);
 		return ch;
 	}
-	r_cons_set_raw (1);
-#if __WINDOWS__
+	r_cons_set_raw (true);
+#if R2__WINDOWS__
 	return __cons_readchar_w32 (0);
 #elif __wasi__
 	void *bed = r_cons_sleep_begin ();
@@ -619,9 +621,6 @@ R_API int r_cons_readchar(void) {
 	r_cons_sleep_end (bed);
 	if (ret < 1) {
 		return -1;
-	}
-	if (bufactive) {
-		r_cons_set_raw (0);
 	}
 	return r_cons_controlz (buf[0]);
 #else
@@ -635,6 +634,7 @@ R_API int r_cons_readchar(void) {
 	// pselect (that is what pselect is for).
 	fd_set readfds;
 	sigset_t sigmask;
+	sigemptyset (&sigmask);
 	FD_ZERO (&readfds);
 	FD_SET (STDIN_FILENO, &readfds);
 	r_signal_sigmask (0, NULL, &sigmask);
@@ -654,9 +654,6 @@ R_API int r_cons_readchar(void) {
 	r_cons_sleep_end (bed);
 	if (ret != 1) {
 		return -1;
-	}
-	if (bufactive) {
-		r_cons_set_raw (0);
 	}
 	return r_cons_controlz (buf[0]);
 #endif
@@ -696,8 +693,8 @@ R_API char *r_cons_password(const char *msg) {
 	int i = 0;
 	printf ("\r%s", msg);
 	fflush (stdout);
-	r_cons_set_raw (1);
-#if __UNIX__ && !__wasi__
+	r_cons_set_raw (true);
+#if R2__UNIX__ && !__wasi__
 	RCons *a = r_cons_singleton ();
 	a->term_raw.c_lflag &= ~(ECHO | ECHONL);
 	// //  required to make therm/iterm show the key
@@ -726,9 +723,9 @@ R_API char *r_cons_password(const char *msg) {
 		buf[i++] = ch;
 	}
 	buf[i] = 0;
-	r_cons_set_raw (0);
+	r_cons_set_raw (false);
 	printf ("\n");
-#if __UNIX__
+#if R2__UNIX__
 	r_sys_signal (SIGTSTP, SIG_DFL);
 #endif
 	return buf;

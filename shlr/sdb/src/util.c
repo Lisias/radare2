@@ -1,6 +1,6 @@
 /* sdb - MIT - Copyright 2011-2022 - pancake */
 
-#include "sdb.h"
+#include "sdb/sdb.h"
 
 #define FORCE_COLLISION 0
 
@@ -62,6 +62,7 @@ SDB_API int gettimeofday(struct timeval* p, struct timezone * tz) {
 #endif
 #endif
 
+#if !SDB_INLINE_HASH
 SDB_API ut32 sdb_hash_len(const char *s, ut32 *len) {
 	ut32 h = CDB_HASHSTART;
 #if FORCE_COLLISION
@@ -74,7 +75,9 @@ SDB_API ut32 sdb_hash_len(const char *s, ut32 *len) {
 	ut32 count = 0;
 	if (s) {
 		while (*s) {
-			h = (h + (h << 5)) ^ *s++;
+			SDB_HASH_ONELINER;
+			// h = (h + (h << 5)) ^ *s++; // 2.22s
+			// h = (h ^ (h << 1)) + *s++; // 2.15s
 			count++;
 		}
 	}
@@ -88,6 +91,7 @@ SDB_API ut32 sdb_hash_len(const char *s, ut32 *len) {
 SDB_API ut32 sdb_hash(const char *s) {
 	return sdb_hash_len (s, NULL);
 }
+#endif
 
 SDB_API ut8 sdb_hash_byte(const char *s) {
 	const ut32 hash = sdb_hash_len (s, NULL);
@@ -121,7 +125,7 @@ SDB_API char *sdb_itoa(ut64 n, int base, char *os, int oslen) {
 	}
 	if (!n) {
 		if (!os) {
-			return strdup ("0");
+			return sdb_strdup ("0");
 		}
 		if (sl > 1) {
 			memcpy (os, "0", 2);
@@ -145,7 +149,7 @@ SDB_API char *sdb_itoa(ut64 n, int base, char *os, int oslen) {
 		s[i--] = '0';
 	}
 	if (!os) {
-		return strdup (s + i + 1);
+		return sdb_strdup (s + i + 1);
 	}
 	if (copy_string) {
 		// unnecessary memmove in case we use the return value

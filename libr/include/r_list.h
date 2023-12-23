@@ -2,7 +2,7 @@
 #define R2_LIST_H
 
 #include <r_types.h>
-#include <sdb.h>
+#include <sdb/sdb.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +34,8 @@ typedef int (*RListComparator)(const void *a, const void *b);
 typedef ut64 (*RListComparatorItem)(const void *a);
 
 #endif
+
+#define R_LIST_FREE if (x) { r_list_free (x); (x) = NULL; }
 
 #ifdef R_API
 #define r_list_foreach(list, it, pos)\
@@ -96,13 +98,15 @@ R_API void r_list_split_iter(RList *list, RListIter *iter);
 R_API int r_list_join(RList *list1, RList *list2);
 R_API void *r_list_get_n(const RList *list, int n);
 R_API int r_list_del_n(RList *list, int n);
-R_API void *r_list_get_top(const RList *list);
-R_API void *r_list_get_bottom(const RList *list);
+R_DEPRECATE R_API void *r_list_get_top(const RList *list);
+R_DEPRECATE R_API void *r_list_get_bottom(const RList *list);
 R_API void r_list_iter_to_top(RList *list, RListIter *iter);
 R_API void *r_list_pop(RList *list);
 R_API void *r_list_pop_head(RList *list);
 R_API void r_list_reverse(RList *list);
-R_API RList *r_list_clone(const RList *list);
+//R_API RList *r_list_clone(const RList *list, );
+typedef void *(*RListClone)(void *);
+R_API RList *r_list_clone(const RList *list, RListClone clone);
 R_API char *r_list_to_str(RList *list, char ch);
 
 /* hashlike api */

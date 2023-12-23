@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2019 - nibble, pancake, alvaro_fe */
+/* radare - LGPL - Copyright 2009-2023 - nibble, pancake, alvaro_fe */
 
 #define R_BIN_MACH064 1
 #include "bin_mach0.c"
@@ -6,7 +6,7 @@
 #include "objc/mach064_classes.h"
 #include "../format/mach0/mach064_is_kernelcache.c"
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	ut8 buf[4] = {0};
 	if (r_buf_size (b) > 4) {
 		r_buf_read_at (b, 0, buf, sizeof (buf));
@@ -265,34 +265,40 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 }
 
 static RBinAddr* binsym(RBinFile *bf, int sym) {
-	ut64 addr;
 	RBinAddr *ret = NULL;
 	switch (sym) {
 	case R_BIN_SYM_MAIN:
-		addr = MACH0_(get_main) (bf->o->bin_obj);
-		if (!addr || !(ret = R_NEW0 (RBinAddr))) {
-			return NULL;
+		{
+			struct MACH0_(obj_t) *mo = R_UNWRAP3 (bf, bo, bin_obj);
+			ut64 addr = MACH0_(get_main) (mo);
+			if (addr != UT64_MAX && addr) {
+				ret = R_NEW0 (RBinAddr);
+				if (ret) {
+					ret->paddr = ret->vaddr = addr;
+				}
+			}
 		}
-		ret->paddr = ret->vaddr = addr;
 		break;
 	}
 	return ret;
 }
 
 RBinPlugin r_bin_plugin_mach064 = {
-	.name = "mach064",
-	.desc = "mach064 bin plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "mach064",
+		.desc = "mach064 bin plugin",
+		.license = "LGPL3",
+	},
 	.get_sdb = &get_sdb,
-	.load_buffer = &load_buffer,
+	.load = &load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.baddr = &baddr,
 	.binsym = binsym,
 	.entries = &entries,
 	.sections = &sections,
 	.signature = &entitlements,
-	.symbols = &symbols,
+	.symbols_vec = &symbols_vec,
 	.imports = &imports,
 	.info = &info,
 	.libs = &libs,

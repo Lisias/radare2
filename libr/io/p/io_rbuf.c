@@ -18,8 +18,6 @@ static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 }
 
 static bool __close(RIODesc *fd) {
-	RBuffer *b = fd->data;
-	r_buf_free (b);
 	return true;
 }
 
@@ -47,12 +45,14 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 }
 
 RIOPlugin r_io_plugin_rbuf = {
-	.name = "rbuf",
-	.desc = "Unsafe RBuffer IO plugin",
+	.meta = {
+		.name = "rbuf",
+		.desc = "Unsafe RBuffer IO plugin",
+		.author = "pancake",
+		.license = "LGPL",
+	},
 	.uris = "rbuf://",
-	.license = "LGPL",
 	.open = __open,
-	.author = "pancake",
 	.close = __close,
 	.read = __read,
 	.seek = __lseek,

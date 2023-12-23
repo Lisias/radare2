@@ -6,14 +6,27 @@ _INCLUDE_MK_GCC_=
 include ../mk/${COMPILER}.mk
 include ../mk/darwin.mk
 
+
+ifeq ($(shell test -f ../ChangeLog -a -d capstone -a ! -d capstone/.git && echo 1),1)
+WITHOUT_PULL=1
+CS_RELEASE=0
+else
+WITHOUT_PULL=0
+
 # Build against last capstone release or next
-ifeq ($(shell test -d ../.git && echo 1),1)
+ifeq ($(shell test -e ../.git && echo 1),1)
+CS_RELEASE=0
+else
+ifeq ($(shell test -d capstone/.git && echo 1),1)
 CS_RELEASE=0
 else
 CS_RELEASE=1
 endif
+endif
+endif
 
-CAPSTONE_CFLAGS?=-g
+# CAPSTONE_CFLAGS?=-g
+CAPSTONE_CFLAGS=
 # CAPSTONE_MAKEFLAGS?=CAPSTONE_ARCHS="arm aarch64"
 
 GIT?=git
@@ -24,7 +37,7 @@ WGET?=curl -o
 endif
 
 ifeq ($(CS_RELEASE),1)
-CS_VER=4.0.2
+CS_VER=5.0
 CS_TAR=https://codeload.github.com/capstone-engine/capstone/tar.gz/$(CS_VER)
 #CS_TAR=http://capstone-engine.org/download/$(CS_VER)/capstone-$(CS_VER).tgz
 CS_PATCHES=0
@@ -35,12 +48,17 @@ CS_URL=$(GIT_PREFIX)$(CS_URL_BASE).git
 CS_ARCHIVE=https://$(CS_URL_BASE)/archive
 CS_UPD=20201203
 # NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/meson.build
+ifeq ($(USE_CSNEXT),1)
+CS_TIP=a4df92eda647e739432860682be638da1b8b901a
+CS_BRA=next
+else
 ifeq ($(USE_CS4),1)
-CS_TIP=a7cac8352f7397aa73bb2e2dcc1b6cdb2e1b8461
+CS_TIP=0efa3cc530ea188c0e03c945ab884ee19dd16342
 CS_BRA=v4
 else
-CS_TIP=ba2199042700e6bda2e0069e924370a7b2530ac0
-CS_BRA=next
+CS_TIP=097c04d9413c59a58b00d4d1c8d5dc0ac158ffaa
+CS_BRA=v5
+endif
 endif
 ifeq ($(CS_COMMIT_ARCHIVE),1)
 CS_ARCHIVE_URL=$(CS_ARCHIVE)/$(CS_TIP).zip
@@ -125,8 +143,8 @@ sdb-host:
 	@echo "HOST SDB"
 	@echo ">>>>>>>>"
 	@echo
-	$(MAKE) -C sdb clean ; rm -f sdb/src/*.o sdb/src/sdb_version.h
-	$(MAKE) -C sdb/src "CC=${HOST_CC}" LDFLAGS='${HOST_LDFLAGS}' CPPFLAGS='' CFLAGS='${HOST_CFLAGS} ${PIC}' bin
+	$(MAKE) -C sdb clean ; rm -f sdb/src/*.o sdb/include/sdb/version.h
+	$(MAKE) -C sdb/src "CC=${HOST_CC}" LDFLAGS='${HOST_LDFLAGS}' CPPFLAGS='-I$(SHLR)/sdb/include' CFLAGS='${HOST_CFLAGS} ${PIC}' bin
 	cp -f sdb/src/sdb${BUILD_EXT_EXE} sdb/src/.sdb${BUILD_EXT_EXE}
 	cp -f sdb/src/sdb${BUILD_EXT_EXE} sdb/sdb$(BUILD_EXT_EXE)
 	rm -f $(SDB_LIBA)
@@ -139,19 +157,21 @@ sdb-target:
 	@echo ">>>>>>>>>>"
 	@echo
 	rm -f src/libsdb.$(EXT_AR)
-	$(MAKE) -C sdb clean ; rm -f sdb/src/*.o sdb/src/sdb_version.h
-	$(MAKE) -C sdb/src sdb_version.h
+	$(MAKE) -C sdb clean ; rm -f sdb/src/*.o ../include/sdb/version.h
+	$(MAKE) -C sdb/src ../include/sdb/version.h
 ifeq ($(EXT_EXE),.wasm)
-	$(MAKE) -C sdb/src ARCH=xxx EXT_AR=.$(EXT_AR) RANLIB="${RANLIB}" CFLAGS_SHARED="${CFLAGS_SHARED} -DHAVE_MMAN=0" \
+	$(MAKE) -C sdb/src ARCH=xxx EXT_AR=.$(EXT_AR) RANLIB="${RANLIB}" CPPFLAGS=-I$(SHLR)/sdb/include \
+		CFLAGS_SHARED="${CFLAGS_SHARED} -DHAVE_MMAN=0" \
 		CC="${CC}" AR="${AR}" ARCH=undefined CFLAGS='${CFLAGS} -DHAVE_MMAN=0' LDFLAGS='${LDFLAGS}' libsdb.$(EXT_AR)
 else
-	$(MAKE) -C sdb/src ARCH=xxx EXT_AR=.$(EXT_AR) RANLIB="${RANLIB}" CFLAGS_SHARED="${CFLAGS_SHARED}" \
+	$(MAKE) -C sdb/src ARCH=xxx EXT_AR=.$(EXT_AR) RANLIB="${RANLIB}" CPPFLAGS="-I$(SHLR)/sdb/include -DHAVE_SYSTEM=0" \
+		CFLAGS_SHARED="${CFLAGS_SHARED}" \
 		CC="${CC}" AR="${AR}" ARCH=undefined LDFLAGS='${LDFLAGS}' libsdb.$(EXT_AR)
 endif
 	$(RANLIB) sdb/src/libsdb.$(EXT_AR)
 
 .PHONY: sdb-sync sync-sdb sdbclean sdb-native sdb-target
-SDB_F=README.md config.mk src Makefile meson.build wasi.mk wasi.sh
+SDB_F=README.md config.mk src include Makefile meson.build wasi.mk wasi.sh
 SDB_SYNCFILES=$(addprefix sdb.vc/,${SDB_F})
 I=../libr/include
 
@@ -175,8 +195,8 @@ sdb-sync sync-sdb:
 	mkdir -p sdb
 	cp -rf ${SDB_SYNCFILES} sdb
 	rm -rf sdb.vc
-	rm -f src/sdb_version.h
-	$(MAKE) -C sdb src/sdb_version.h
+	rm -f include/sdb/version.h
+	$(MAKE) -C sdb include/sdb/version.h
 	mkdir -p sdb/test sdb/memcache
 	sed -e 's,HAVE_VALA=,HAVE_VALA=#,' sdb/config.mk > .t
 	mv .t sdb/config.mk
@@ -248,11 +268,13 @@ else
 
 capstone: capstone-sync
 
+patch-capstone capstone-patch:
+
 capstone-sync:
 ifeq ($(WITHOUT_PULL),1)
 	@echo "Nothing to sync because of --without-pull"
 else
-	if [ ! -d capstone ]; then \
+	if [ ! -d capstone ] || [ ! -f capstone/libcapstone.a ] || [ $(shell [ -d capstone/.git ] && git --git-dir capstone/.git rev-parse HEAD) != $(CS_TIP) ]; then \
 		"$(SHELL)" capstone.sh "${CS_URL}" "${CS_BRA}" "${CS_TIP}" "${CS_REV}" "${CS_ARCHIVE_URL}" ; \
 	fi
 endif
@@ -332,7 +354,6 @@ SHLRS+=capstone/libcapstone.a
 SHLRS+=gdb/lib/libgdbr.a
 SHLRS+=grub/libgrubfs.a
 SHLRS+=java/libr_java.a
-SHLRS+=lz4/liblz4.a
 SHLRS+=qnx/lib/libqnxr.a
 SHLRS+=winkd/libr_winkd.a
 SHLRS+=zip/librz.a

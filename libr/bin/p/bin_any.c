@@ -1,69 +1,52 @@
-/* radare - LGPL - Copyright 2009-2019 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2023 - pancake, nibble */
 
-#include <r_types.h>
-#include <r_util.h>
-#include <r_lib.h>
 #include <r_bin.h>
 #include <r_magic.h>
 
 static char *get_filetype(RBuffer *b) {
-	ut8 buf[4096] = {0};
+	ut8 buf[1024] = {0};
 	char *res = NULL;
 	RMagic *ck = r_magic_new (0);
-	if (!ck) {
-		return NULL;
+	if (ck) {
+		const char *tmp = NULL;
+		// TODO: dir.magic is not honored here
+		r_magic_load (ck, R2_SDB_MAGIC);
+		r_buf_read_at (b, 0, buf, sizeof (buf));
+		tmp = r_magic_buffer (ck, buf, sizeof (buf));
+		if (tmp) {
+			res = strdup (tmp);
+		}
+		r_magic_free (ck);
 	}
-	const char *tmp = NULL;
-	// TODO: dir.magic not honored here
-	r_magic_load (ck, R2_SDB_MAGIC);
-	r_buf_read_at (b, 0, buf, sizeof (buf));
-	tmp = r_magic_buffer (ck, buf, sizeof (buf));
-	if (tmp) {
-		res = strdup (tmp);
-	}
-	r_magic_free (ck);
 	return res;
 }
 
 static RBinInfo *info(RBinFile *bf) {
 	RBinInfo *ret = R_NEW0 (RBinInfo);
-	if (!ret) {
-		return NULL;
+	if (ret != NULL) {
+		ret->file = bf->file? strdup (bf->file): NULL;
+		ret->type = get_filetype (bf->buf);
+		ret->has_retguard = -1;
 	}
-	ret->lang = "";
-	ret->file = bf->file? strdup (bf->file): NULL;
-	ret->type = get_filetype (bf->buf);
-	ret->has_pi = 0;
-	ret->has_canary = 0;
-	ret->has_retguard = -1;
-	ret->big_endian = 0;
-	ret->has_va = 0;
-	ret->has_nx = 0;
-	ret->dbg_info = 0;
-	ret->dbg_info = 0;
-	ret->dbg_info = 0;
 	return ret;
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	return true;
 }
 
-static void destroy(RBinFile *bf) {
-	r_buf_free (bf->o->bin_obj);
-}
-
-static ut64 baddr(RBinFile *bf) {
-	return 0LL;
+static void fini(RBinFile *bf) {
+	r_buf_free (bf->bo->bin_obj);
 }
 
 RBinPlugin r_bin_plugin_any = {
-	.name = "any",
-	.desc = "Dummy format r_bin plugin",
-	.license = "LGPL3",
-	.load_buffer = &load_buffer,
-	.destroy = &destroy,
-	.baddr = &baddr,
+	.meta = {
+		.name = "any",
+		.desc = "Dummy format r_bin plugin",
+		.license = "LGPL3",
+	},
+	.load = load,
+	.destroy = fini,
 	.info = info,
 	.minstrlen = 0,
 };

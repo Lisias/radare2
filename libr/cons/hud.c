@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2008-2021 - pancake */
+/* radare - LGPL - Copyright 2008-2023 - pancake */
 
 #include <r_cons.h>
 #include <ctype.h>
@@ -9,12 +9,15 @@
 R_API char *r_cons_hud_file(const char *f) {
 	char *s = r_file_slurp (f, NULL);
 	if (s) {
+		r_str_ansi_strip (s);
 		char *ret = r_cons_hud_string (s);
 		free (s);
 		return ret;
 	}
 	return NULL;
 }
+
+static char *r_cons_hud_line(RList *list, const char *prompt);
 
 // Display a buffer in the hud (splitting it line-by-line and ignoring
 // the lines starting with # )
@@ -29,6 +32,7 @@ R_API char *r_cons_hud_line_string(const char *s) {
 	}
 	r_str_replace_ch (o, '\r', 0, true);
 	r_str_replace_ch (o, '\t', 0, true);
+	r_str_ansi_strip (o);
 	RList *fl = r_list_new ();
 	int i;
 	if (!fl) {
@@ -66,6 +70,7 @@ R_API char *r_cons_hud_string(const char *s) {
 	if (!o) {
 		return NULL;
 	}
+	r_str_ansi_strip (o);
 	r_str_replace_ch (o, '\r', 0, true);
 	r_str_replace_ch (o, '\t', 0, true);
 	RList *fl = r_list_new ();
@@ -146,7 +151,6 @@ static bool __matchString(char *entry, char *filter, char *mask, const int mask_
 	free (ansi_filtered);
 	return true;
 }
-
 
 static RList *hud_filter(RList *list, char *user_input, int top_entry_n, int *current_entry_n, char **selected_entry, bool simple) {
 	RListIter *iter;
@@ -340,7 +344,7 @@ _beach:
 	return NULL;
 }
 
-R_API char *r_cons_hud_line(RList *list, const char *prompt) {
+static char *r_cons_hud_line(RList *list, const char *prompt) {
 	char user_input[HUD_BUF_SIZE + 1];
 	char *selected_entry = NULL;
 	RListIter *iter;

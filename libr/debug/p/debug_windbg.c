@@ -275,12 +275,12 @@ static char *windbg_reg_profile(RDebug *dbg) {
 	return NULL;
 }
 
-static int windbg_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
+static bool windbg_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 	DbgEngContext *idbg = dbg->user;
 	r_return_val_if_fail (idbg && idbg->initialized, 0);
 	ULONG ptype;
 	if (!idbg || !idbg->initialized || FAILED (ITHISCALL (dbgCtrl, GetActualProcessorType, &ptype))) {
-		return 0;
+		return false;
 	}
 	if (ptype == IMAGE_FILE_MACHINE_IA64 || ptype == IMAGE_FILE_MACHINE_AMD64) {
 		DWORD *b = (DWORD *)(buf + 0x30);
@@ -296,17 +296,18 @@ static int windbg_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 		*b |= 0xff | CONTEXT_ARM;
 	}
 	if (SUCCEEDED (ITHISCALL (dbgAdvanced, GetThreadContext, (PVOID)buf, size))) {
-		return size;
+		return true;
 	}
-	return 0;
+	return false;
 }
-static int windbg_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
+
+static bool windbg_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
 	DbgEngContext *idbg = dbg->user;
 	r_return_val_if_fail (idbg && idbg->initialized, 0);
 	if (SUCCEEDED (ITHISCALL (dbgAdvanced, SetThreadContext, (PVOID)buf, size))) {
-		return size;
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 static RList *windbg_frames(RDebug *dbg, ut64 at) {
@@ -595,7 +596,7 @@ RList *windbg_pids(RDebug *dbg, int pid) {
 		for (i = 0; i < ids_cnt; i++) {
 			char path[MAX_PATH];
 			if (SUCCEEDED (ITHISCALL (dbgClient, GetRunningProcessDescription,
-				    idbg->server, ids[i], DEBUG_PROC_DESC_DEFAULT,
+					idbg->server, ids[i], DEBUG_PROC_DESC_DEFAULT,
 					path, sizeof (path), NULL, NULL, 0, NULL))) {
 				RDebugPid *pid = r_debug_pid_new (path, ids[i], 0, 'r', 0);
 				r_list_append (list, pid);
@@ -606,12 +607,16 @@ RList *windbg_pids(RDebug *dbg, int pid) {
 }
 
 RDebugPlugin r_debug_plugin_windbg = {
-	.name = "windbg",
-	.license = "LGPL3",
+	.meta = {
+		.name = "windbg",
+		.license = "LGPL3",
+		.author = "pancake",
+		.desc = "comunicate with a windbg",
+	},
 	.bits = R_SYS_BITS_64,
 	.arch = "x86,x64,arm,arm64",
 	.canstep = 1,
-	.init = windbg_init,
+	.init_debugger = windbg_init,
 	.attach = windbg_attach,
 	.detach = windbg_detach,
 	.breakpoint = windbg_breakpoint,

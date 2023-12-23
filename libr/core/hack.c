@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2022 - pancake */
+/* radare - LGPL - Copyright 2011-2023 - pancake */
 
 #include <r_core.h>
 
@@ -7,26 +7,33 @@
  * have several modes/alignment requirements.
  */
 
-void r_core_hack_help(const RCore *core) {
-	const char* help_msg[] = {
-		"wao", " [op]", "performs a modification on current opcode",
-		"wao", " nop", "nop current opcode",
-		"wao", " jinf", "assemble an infinite loop",
-		"wao", " jz", "make current opcode conditional (same as je) (zero)",
-		"wao", " jnz", "make current opcode conditional (same as jne) (not zero)",
-		"wao", " ret1", "make the current opcode return 1",
-		"wao", " ret0", "make the current opcode return 0",
-		"wao", " retn", "make the current opcode return -1",
-		"wao", " nocj", "remove conditional operation from branch (make it unconditional)",
-		"wao", " trap", "make the current opcode a trap",
-		"wao", " recj", "reverse (swap) conditional branch instruction",
-		"WIP:", "", "not all archs are supported and not all commands work on all archs",
-		NULL
-	};
-	r_core_cmd_help (core, help_msg);
+static bool r_core_hack_riscv(RCore *core, const char *op, const RAnalOp *analop) {
+	// TODO honor analop->size
+	if (!strcmp (op, "nop")) {
+		if (analop->size < 2) {
+			R_LOG_ERROR ("Can't nop <4 byte instructions");
+			return false;
+		}
+		if (analop->size < 4) {
+			r_core_cmd0 (core, "wx 0100");
+		} else {
+			r_core_cmd0 (core, "wx 13000000");
+		}
+		return true;
+	}
+	if (!strcmp (op, "jinf")) {
+		if (analop->size < 2) {
+			R_LOG_ERROR ("Minimum jinf is 2 byte");
+			return false;
+		}
+		r_core_cmd0 (core, "wx 01a0");
+		return true;
+	}
+	R_LOG_ERROR ("Unsupported operation '%s'", op);
+	return false;
 }
 
-R_API bool r_core_hack_dalvik(RCore *core, const char *op, const RAnalOp *analop) {
+static bool r_core_hack_dalvik(RCore *core, const char *op, const RAnalOp *analop) {
 	if (!strcmp (op, "nop")) {
 		r_core_cmdf (core, "wx 0000");
 	} else if (!strcmp (op, "ret2")) {
@@ -63,8 +70,35 @@ R_API bool r_core_hack_arm64(RCore *core, const char *op, const RAnalOp *analop)
 		R_LOG_ERROR ("ARM jnz hack not supported");
 		return false;
 	} else if (!strcmp (op, "recj")) {
-		R_LOG_ERROR ("TODO: use jnz or jz");
-		return false;
+		if (analop->size < 4) {
+			return false;
+		}
+		const ut8 *buf = analop->bytes;
+		if (!buf) {
+			buf = core->block;
+		}
+		switch (*buf) {
+		case 0x4c: // bgt -> ble
+			r_core_cmd_call (core, "wx 4d");
+			break;
+		case 0x4d: // ble -> bgt
+			r_core_cmd_call (core, "wx 4c");
+			break;
+		default:
+			switch (buf[3]) {
+			case 0x34: // cbz
+			case 0xb4: // cbz
+				r_core_cmdf (core, "wx 35 @ $$+3");
+				break;
+			case 0x35: // cbnz
+				r_core_cmdf (core, "wx b4 @ $$+3");
+				break;
+			default:
+				R_LOG_ERROR ("TODO: unsupported instruction to toggle conditional jump");
+				return false;
+			}
+			break;
+		}
 	} else if (!strcmp (op, "ret1")) {
 		r_core_cmdf (core, "wa mov x0, 1,,ret");
 	} else if (!strcmp (op, "ret0")) {
@@ -85,7 +119,6 @@ R_API bool r_core_hack_arm(RCore *core, const char *op, const RAnalOp *analop) {
 		const int nopsize = (bits == 16)? 2: 4;
 		const char *nopcode = (bits == 16)? "00bf":"0000a0e1";
 		const int len = analop->size;
-		char* str;
 		int i;
 
 		if (len % nopsize) {
@@ -93,11 +126,11 @@ R_API bool r_core_hack_arm(RCore *core, const char *op, const RAnalOp *analop) {
 			return false;
 		}
 
-		str = calloc (len + 1, 2);
+		char *str = calloc (len + 1, 2);
 		if (!str) {
 			return false;
 		}
-		for (i = 0; i < len; i+=nopsize) {
+		for (i = 0; i < len; i += nopsize) {
 			memcpy (str + i * 2, nopcode, nopsize * 2);
 		}
 		str[len * 2] = '\0';
@@ -263,20 +296,47 @@ R_API bool r_core_hack_x86(RCore *core, const char *op, const RAnalOp *analop) {
 	return true;
 }
 
-// R2580 - return bool
-R_API int r_core_hack(RCore *core, const char *op) {
+R_API bool r_core_hack(RCore *core, const char *op) {
 	r_return_val_if_fail (core && op, false);
 	bool (*hack)(RCore *core, const char *op, const RAnalOp *analop) = NULL;
 	const char *asmarch = r_config_get (core->config, "asm.arch");
 	const int asmbits = core->rasm->config->bits;
+	const bool doseek = (*op == '+');
+	if (doseek) {
+		op++;
+	}
 
 	if (!asmarch) {
 		return false;
 	}
+	if (core->blocksize < 4) {
+		return false;
+	}
+#if R2_600
+	// R2_590 TODO: call RArch.patch() if available, otherwise just do this hack until all anal plugs are moved to arch
+	// r_arch_patch (aop, 0);
+	RArchSession *acur = R_UNWRAP3 (core, rasm, acur);
+	if (acur && acur->plugin->patch) {
+		RAnalOp *aop = r_anal_op_new ();
+		r_anal_op_set_mnemonic (aop, core->offset, op);
+		r_anal_op_set_bytes (aop, core->offset, r_mem_dup (core->block, core->blocksize), core->blocksize);
+#if 0
+		r_arch_session_patch (core->anal->arch, aop, 0);
+#endif
+		bool res = acur->plugin->patch (acur, aop, 0);
+		if (res) {
+			// ... r_io_write_at ()
+		}
+		r_anal_op_free (aop);
+		return res;
+	}
+#endif
 	if (strstr (asmarch, "x86")) {
 		hack = r_core_hack_x86;
 	} else if (strstr (asmarch, "dalvik")) {
 		hack = r_core_hack_dalvik;
+	} else if (strstr (asmarch, "riscv")) {
+		hack = r_core_hack_riscv;
 	} else if (strstr (asmarch, "arm")) {
 		if (asmbits == 64) {
 			hack = r_core_hack_arm64;
@@ -287,12 +347,19 @@ R_API int r_core_hack(RCore *core, const char *op) {
 		R_LOG_WARN ("Write hacks are only implemented for x86, arm32, arm64 and dalvik");
 	}
 	if (hack) {
-		RAnalOp analop;
-		if (!r_anal_op (core->anal, &analop, core->offset, core->block, core->blocksize, R_ARCH_OP_MASK_BASIC)) {
+		RAnalOp aop = {0};
+		aop.addr = core->offset;
+		r_anal_op_set_bytes (&aop, core->offset, core->block, 4);
+		// TODO: use r_arch_decode
+		if (!r_anal_op (core->anal, &aop, core->offset, core->block, core->blocksize, R_ARCH_OP_MASK_BASIC)) {
 			R_LOG_ERROR ("anal op fail");
 			return false;
 		}
-		return hack (core, op, &analop);
+		bool res = hack (core, op, &aop);
+		if (doseek) {
+			r_core_seek (core, core->offset + aop.size, 1);
+		}
+		return res;
 	}
 	return false;
 }

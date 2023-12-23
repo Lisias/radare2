@@ -1,3 +1,17 @@
+NAME=wawa
+FILE=-
+CMDS=<<EOF
+-a sh
+pd 1
+wa 8d00
+pd 1
+EOF
+EXPECT=<<EOF
+            0x00000000      0000           .word 0x00000000
+            0x00000000      0000           .word 0x00000000
+EOF
+RUN
+
 NAME=endian tests: mips
 FILE=-
 CMDS=<<EOF
@@ -78,7 +92,7 @@ pi 1
 EOF
 EXPECT=<<EOF
 call 0x55222794
-call 0x55222794
+invalid
 EOF
 RUN
 
@@ -86,6 +100,23 @@ NAME=endian tests: sparc.gnu
 FILE=-
 CMDS=<<EOF
 e asm.arch=sparc.gnu
+e asm.bits=64
+wx 554889e5
+e cfg.bigendian=true
+pi 1
+e cfg.bigendian=false
+pi 1
+EOF
+EXPECT=<<EOF
+call 0x55222794
+invalid
+EOF
+RUN
+
+NAME=endian tests: sparc.cs
+FILE=-
+CMDS=<<EOF
+e asm.arch=sparc
 e asm.bits=64
 wx 554889e5
 e cfg.bigendian=true

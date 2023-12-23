@@ -30,7 +30,8 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 				}
 				mal->buf = obuf;
 				mal->size = osz;
-				return r_io_desc_new (io, &r_io_plugin_xalz, diskpath, R_PERM_RW | rw, mode, mal);
+				return r_io_desc_new (io, &r_io_plugin_xalz, diskpath,
+					R_PERM_RW | (rw & R_PERM_X), mode, mal);
 			}
 			free (data);
 		}
@@ -40,10 +41,12 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 }
 
 RIOPlugin r_io_plugin_xalz = {
-	.name = "xalz",
-	.desc = "XAmarin LZ4 assemblies",
+	.meta = {
+		.name = "xalz",
+		.desc = "XAmarin LZ4 assemblies",
+		.license = "MIT",
+	},
 	.uris = "xalz://",
-	.license = "MIT",
 	.open = __open,
 	.close = io_memory_close,
 	.read = io_memory_read,

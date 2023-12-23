@@ -2,7 +2,7 @@
 
 #define _R_LIST_C_
 #include "r_util.h"
-#include <set.h>
+#include <sdb/set.h>
 
 #define MERGE_LIMIT 24
 
@@ -343,13 +343,13 @@ R_API int r_list_del_n(RList *list, int n) {
 	return false;
 }
 
-R_API void *r_list_get_top(const RList *list) {
+R_DEPRECATE R_API void *r_list_get_top(const RList *list) {
 	r_return_val_if_fail (list, NULL);
 
 	return list->tail ? list->tail->data : NULL;
 }
 
-R_API void *r_list_get_bottom(const RList *list) {
+R_DEPRECATE R_API void *r_list_get_bottom(const RList *list) {
 	r_return_val_if_fail (list, NULL);
 
 	return list->head ? list->head->data : NULL;
@@ -390,7 +390,7 @@ R_API void r_list_reverse(RList *list) {
 	list->tail = tmp;
 }
 
-R_API RList *r_list_clone(const RList *list) {
+R_API RList *r_list_clone(const RList *list, RListClone clone) {
 	RListIter *iter;
 	void *data;
 
@@ -400,9 +400,16 @@ R_API RList *r_list_clone(const RList *list) {
 	if (!l) {
 		return NULL;
 	}
-	l->free = NULL;
-	r_list_foreach (list, iter, data) {
-		r_list_append (l, data);
+	if (clone) {
+		l->free = list->free;
+		r_list_foreach (list, iter, data) {
+			r_list_append (l, clone (data));
+		}
+	} else {
+		l->free = NULL;
+		r_list_foreach (list, iter, data) {
+			r_list_append (l, data);
+		}
 	}
 	l->sorted = list->sorted;
 	return l;
@@ -630,16 +637,13 @@ R_API void r_list_sort(RList *list, RListComparator cmp) {
 R_API RList *r_list_uniq(const RList *list, RListComparatorItem cmp) {
 	RListIter *iter, *iter2;
 	void *item;
-	int deleted = 0;
 
 	r_return_val_if_fail (list && cmp, 0);
 	RList *rlist = r_list_newf (list->free);
 	SetU *s = set_u_new ();
 	r_list_foreach_safe (list, iter, iter2, item) {
 		ut64 v = cmp (item);
-		if (set_u_contains (s, v)) {
-			deleted ++;
-		} else {
+		if (!set_u_contains (s, v)) {
 			set_u_add (s, v);
 			r_list_append (rlist, item);
 		}
@@ -667,6 +671,7 @@ R_API int r_list_uniq_inplace(RList *list, RListComparatorItem cmp) {
 	set_u_free (s);
 	return deleted;
 }
+
 R_API char *r_list_to_str(RList *list, char ch) {
 	RListIter *iter;
 	RStrBuf *buf = r_strbuf_new ("");

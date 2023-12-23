@@ -137,7 +137,8 @@ extern char *alloca ();
    also rename them via #define to avoid compiler errors when the
    static definition conflicts with the extern declaration in a header
    file.  */
-#ifdef IN_GLIBCPP_V3
+#if 0
+//#ifdef IN_GLIBCPP_V3
 
 #define CP_STATIC_IF_GLIBCPP_V3 static
 
@@ -180,6 +181,7 @@ static void d_init_info(const char *, int, size_t, struct d_info *);
 #endif /* ! defined(IN_GLIBCPP_V3) */
 
 /* See if the compiler supports dynamic arrays.  */
+// CP_STATIC_IF_GLIBCPP_V3 struct demangle_component * cplus_demangle_type(struct d_info *di);
 
 #ifdef __GNUC__
 #define CP_DYNAMIC_ARRAYS
@@ -314,7 +316,7 @@ struct d_info_checkpoint
 };
 
 /* Maximum number of times d_print_comp may be called recursively.  */
-#define MAX_RECURSION_COUNT 1024
+#define MAX_RECURSION_COUNT 512
 
 enum { D_PRINT_BUFFER_LENGTH = 256 };
 struct d_print_info
@@ -1212,7 +1214,7 @@ d_make_sub (struct d_info *di, const char *name, int len)
 
    TOP_LEVEL is non-zero when called at the top level.  */
 
-CP_STATIC_IF_GLIBCPP_V3
+static
 struct demangle_component *
 cplus_demangle_mangled_name (struct d_info *di, int top_level)
 {
@@ -2371,8 +2373,8 @@ cplus_demangle_builtin_types[D_BUILTIN_TYPE_COUNT] =
 	     D_PRINT_DEFAULT },
 };
 
-CP_STATIC_IF_GLIBCPP_V3
-struct demangle_component *
+//CP_STATIC_IF_GLIBCPP_V3
+static struct demangle_component *
 cplus_demangle_type (struct d_info *di)
 {
   char peek;
@@ -3771,13 +3773,13 @@ d_clone_suffix (struct d_info *di, struct demangle_component *encoding)
     {
       pend += 2;
       while (IS_LOWER (*pend) || *pend == '_')
-	++pend;
+	pend++;
     }
   while (*pend == '.' && IS_DIGIT (pend[1]))
     {
       pend += 2;
       while (IS_DIGIT (*pend))
-	++pend;
+	pend++;
     }
   d_advance (di, pend - suffix);
   n = d_make_name (di, suffix, pend - suffix);
@@ -3875,7 +3877,7 @@ d_substitution (struct d_info *di, int prefix)
 	    }
 	  while (c != '_');
 
-	  ++id;
+	  id++;
 	}
 
       if (id >= (unsigned int) di->next_sub)
@@ -4043,10 +4045,12 @@ d_growable_string_callback_adapter (const char *s, size_t l, void *opaque)
 
 static void
 d_count_templates_scopes (int *num_templates, int *num_scopes,
-			  const struct demangle_component *dc)
+			  const struct demangle_component *dc, int depth)
 {
-  if (dc == NULL)
+  if (dc == NULL) {
     return;
+  }
+  depth++;
 
   switch (dc->type)
     {
@@ -4063,12 +4067,14 @@ d_count_templates_scopes (int *num_templates, int *num_scopes,
 
     case DEMANGLE_COMPONENT_TEMPLATE:
       (*num_templates)++;
+      depth++;
       goto recurse_left_right;
 
     case DEMANGLE_COMPONENT_REFERENCE:
     case DEMANGLE_COMPONENT_RVALUE_REFERENCE:
       if (d_left (dc)->type == DEMANGLE_COMPONENT_TEMPLATE_PARAM)
 	(*num_scopes)++;
+      depth++;
       goto recurse_left_right;
 
     case DEMANGLE_COMPONENT_QUAL_NAME:
@@ -4133,42 +4139,44 @@ d_count_templates_scopes (int *num_templates, int *num_scopes,
     case DEMANGLE_COMPONENT_TAGGED_NAME:
     case DEMANGLE_COMPONENT_CLONE:
     recurse_left_right:
-      d_count_templates_scopes (num_templates, num_scopes,
-				d_left (dc));
-      d_count_templates_scopes (num_templates, num_scopes,
-				d_right (dc));
+      if (depth++ > 256) {
+        fprintf (stderr, "Max depth spotted in the template scopes\n");
+        break;
+      }
+      d_count_templates_scopes (num_templates, num_scopes, d_left (dc), depth);
+      d_count_templates_scopes (num_templates, num_scopes, d_right (dc), depth);
       break;
 
     case DEMANGLE_COMPONENT_CTOR:
       d_count_templates_scopes (num_templates, num_scopes,
-				dc->u.s_ctor.name);
+				dc->u.s_ctor.name, depth);
       break;
 
     case DEMANGLE_COMPONENT_DTOR:
       d_count_templates_scopes (num_templates, num_scopes,
-				dc->u.s_dtor.name);
+				dc->u.s_dtor.name, depth);
       break;
 
     case DEMANGLE_COMPONENT_EXTENDED_OPERATOR:
       d_count_templates_scopes (num_templates, num_scopes,
-				dc->u.s_extended_operator.name);
+				dc->u.s_extended_operator.name, depth);
       break;
 
     case DEMANGLE_COMPONENT_FIXED_TYPE:
       d_count_templates_scopes (num_templates, num_scopes,
-                                dc->u.s_fixed.length);
+                                dc->u.s_fixed.length, depth);
       break;
 
     case DEMANGLE_COMPONENT_GLOBAL_CONSTRUCTORS:
     case DEMANGLE_COMPONENT_GLOBAL_DESTRUCTORS:
       d_count_templates_scopes (num_templates, num_scopes,
-				d_left (dc));
+				d_left (dc), depth);
       break;
 
     case DEMANGLE_COMPONENT_LAMBDA:
     case DEMANGLE_COMPONENT_DEFAULT_ARG:
       d_count_templates_scopes (num_templates, num_scopes,
-				dc->u.s_unary_num.sub);
+				dc->u.s_unary_num.sub, depth);
       break;
     }
 }
@@ -4204,7 +4212,7 @@ d_print_init (struct d_print_info *dpi, demangle_callbackref callback,
   dpi->num_copy_templates = 0;
 
   d_count_templates_scopes (&dpi->num_copy_templates,
-			    &dpi->num_saved_scopes, dc);
+			    &dpi->num_saved_scopes, dc, 0);
   dpi->num_copy_templates *= dpi->num_saved_scopes;
 
   dpi->current_template = NULL;
@@ -4266,7 +4274,7 @@ static inline void
 d_append_num (struct d_print_info *dpi, int l)
 {
   char buf[25];
-  sprintf (buf,"%d", l);
+  snprintf (buf, sizeof (buf) - 1, "%d", l);
   d_append_string (dpi, buf);
 }
 
@@ -4285,7 +4293,7 @@ d_last_char (struct d_print_info *dpi)
    memory to build an output string, so cannot encounter memory
    allocation failure.  */
 
-CP_STATIC_IF_GLIBCPP_V3
+static
 int
 cplus_demangle_print_callback (int options,
                                struct demangle_component *dc,
@@ -4312,7 +4320,7 @@ cplus_demangle_print_callback (int options,
     dpi.copy_templates = alloca (dpi.num_copy_templates
 				 * sizeof (*dpi.copy_templates));
 #endif
-    dpi.depth = 512;
+    dpi.depth = 4096;
 
     d_print_comp (&dpi, options, dc);
   }
@@ -4457,7 +4465,7 @@ d_pack_length (const struct demangle_component *dc)
   while (dc && dc->type == DEMANGLE_COMPONENT_TEMPLATE_ARGLIST
 	 && d_left (dc))
     {
-      ++count;
+      count++;
       dc = d_right (dc);
     }
   return count;
@@ -4482,7 +4490,7 @@ d_args_length (struct d_print_info *dpi, const struct demangle_component *dc)
 	  count += d_pack_length (a);
 	}
       else
-	++count;
+	count++;
     }
   return count;
 }
@@ -4640,10 +4648,6 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
   /* Variable used to store the current templates while a previously
      captured scope is used.  */
   struct d_print_template *saved_templates;
-  if (--dpi->depth < 1) {
-    fprintf (stderr, "Stack exhaustion prevented\n");
-    return;
-  }
   /* Nonzero if templates have been stored in the above variable.  */
   int need_template_restore = 0;
 
@@ -4719,7 +4723,7 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
 	    adpm[i].mod = typed_name;
 	    adpm[i].printed = 0;
 	    adpm[i].templates = dpi->templates;
-	    ++i;
+	    i++;
 
 	    if (!is_fnqual_component_type (typed_name->type))
 	      break;
@@ -4758,7 +4762,7 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
 		adpm[i - 1].mod = typed_name;
 		adpm[i - 1].printed = 0;
 		adpm[i - 1].templates = dpi->templates;
-		++i;
+		i++;
 
 		typed_name = d_left (typed_name);
 	      }
@@ -5230,7 +5234,7 @@ d_print_comp_inner (struct d_print_info *dpi, int options,
 		adpm[i].next = dpi->modifiers;
 		dpi->modifiers = &adpm[i];
 		pdpm->printed = 1;
-		++i;
+		i++;
 	      }
 
 	    pdpm = pdpm->next;
@@ -5736,6 +5740,7 @@ d_print_comp (struct d_print_info *dpi, int options,
   if (dc == NULL || dc->d_printing > 1 || dpi->recursion > MAX_RECURSION_COUNT)
     {
       d_print_error (dpi);
+      fprintf (stderr, "Stack exhaustion prevented\n");
       return;
     }
 

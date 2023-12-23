@@ -24,7 +24,9 @@ r_bin_sources = [
   'p/bin_dbginfo_dex.c',
   'p/bin_dbginfo_elf.c',
   'p/bin_dbginfo_elf64.c',
+  'p/bin_dbginfo_p9.c',
   'p/bin_dex.c',
+  'p/bin_dis.c',
   'p/bin_dmp64.c',
   'p/bin_dol.c',
   'p/bin_dyldcache.c',
@@ -75,6 +77,7 @@ r_bin_sources = [
   'p/bin_write_pe.c',
   'p/bin_write_pe64.c',
   'p/bin_xbe.c',
+  'p/bin_xcoff64.c',
   'p/bin_xnu_kernelcache.c',
   'p/bin_xtr_dyldcache.c',
   'p/bin_xtr_fatmach0.c',
@@ -83,9 +86,11 @@ r_bin_sources = [
   'p/bin_xtr_xalz.c',
   'p/bin_z64.c',
   'p/bin_zimg.c',
+  'p/bin_xtac.c',
 # implementation
   'format/bflt/bflt.c',
   'format/coff/coff.c',
+  'format/coff/xcoff64.c',
   'format/dex/dex.c',
   'format/dmp/dmp64.c',
   'format/elf/elf.c',
@@ -137,7 +142,7 @@ r_bin_sources = [
   'mangling/demangler.c',
   'mangling/rust.c',
   'mangling/java.c',
-  'mangling/microsoft_demangle.c',
+  'mangling/microsoft.c',
   'mangling/msvc.c',
   'mangling/objc.c',
   'mangling/swift-sd.c',
@@ -148,6 +153,9 @@ r_bin_sources += r_bin_d_sources
 
 r_bin_inc = [platform_inc, include_directories('mangling', 'format')]
 
+if not get_option('use_sys_lz4')
+  library_cflags += ['-DUSE_SMALLZ4']
+endif
 r_bin = library('r_bin', r_bin_sources,
   include_directories: r_bin_inc,
   c_args: ['-DR_API_BIN_ONLY=1'] + library_cflags,

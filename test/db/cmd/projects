@@ -1,5 +1,5 @@
 NAME=Resaving maps fails
-FILE=-
+FILE=malloc://0x400
 CMDS=<<EOF
 om 3 0x8000 0x200 0x200 r--
 om 3 0xc000 0x100 0x300 r--
@@ -15,15 +15,15 @@ om*
 rm a.r2
 EOF
 EXPECT=<<EOF
-omu 3 0x00000000 0x00000200 0x00000000 rwx
+omu 3 0x00000000 0x00000400 0x00000000 rwx
 omu 3 0x00008000 0x00000200 0x00000200 r--
 omu 3 0x0000c000 0x00000100 0x00000300 r--
 dos
-omu 3 0x00000000 0x00000200 0x00000000 rwx
+omu 3 0x00000000 0x00000400 0x00000000 rwx
 omu 3 0x00008000 0x00000200 0x00000200 r--
 omu 3 0x0000c000 0x00000100 0x00000300 r--
 tre
-omu 3 0x00000000 0x00000200 0x00000000 rwx
+omu 3 0x00000000 0x00000400 0x00000000 rwx
 omu 3 0x00008000 0x00000200 0x00000200 r--
 omu 3 0x0000c000 0x00000100 0x00000300 r--
 EOF
@@ -71,7 +71,7 @@ EXPECT=<<EOF
             0x100003c14      4155           push r13
             0x100003c16      4154           push r12
             0x100003c18      53             push rbx
-            0x100003c19      4881ec380600.  sub rsp, 0x638
+            0x100003c19      4881ec3806..   sub rsp, 0x638
             0x100003c20      4989f7         mov r15, rsi
             0x100003c23      4189fe         mov r14d, edi
 0x100003c0c
@@ -87,7 +87,7 @@ EXPECT=<<EOF
             0x100003c14      4155           push r13
             0x100003c16      4154           push r12
             0x100003c18      53             push rbx
-            0x100003c19      4881ec380600.  sub rsp, 0x638
+            0x100003c19      4881ec3806..   sub rsp, 0x638
             0x100003c20      4989f7         mov r15, rsi
             0x100003c23      4189fe         mov r14d, edi
  3 fd: 3 +0x00004000 0x100000000 - 0x100007fff r-x fmap.__TEXT
@@ -107,7 +107,7 @@ e scr.interactive=false
 e dir.projects = bins/other/projects
 CC hello world
 C*
-Po test > /dev/null
+P test > /dev/null
 C*
 EOF
 EXPECT=<<EOF
@@ -152,7 +152,7 @@ af test
 afF @ test
 pdf
 P+import2 > /dev/null
-Pc import2~afF
+PS*import2~afF
 P-import2
 rm .tmp
 EOF
@@ -172,10 +172,10 @@ e dir.projects = .tmp/
 CC "Some other test" @ 0x00404890
 P+ testexp > /dev/null
 cat .tmp/testexp/rc.r2 | grep base64
-rmdir -p .tmp/testexp
+rm -rf .tmp/testexp
 EOF
 EXPECT=<<EOF
-"e bin.debase64 = false"
+"e bin.str.debase64 = false"
 CCu base64:IlNvbWUgb3RoZXIgdGVzdCI= @ 0x00404890
 EOF
 RUN
@@ -191,9 +191,9 @@ CC "Second comment" @ 0x00404800
 P+ testset > /dev/null
 C- @ 0x00404890
 C- @ 0x00404800
-Po project.r2
+P project.r2
 cat .tmp/testset/rc.r2 | grep CC
-rmdir -p .tmp/testset
+rm -rf .tmp/testset
 EOF
 EXPECT=<<EOF
 CCu base64:IlNlY29uZCBjb21tZW50Ig== @ 0x00404800
@@ -228,7 +228,7 @@ echo Saved `pu 3 @ 0xc000`
 # Ps resetc64
 pu 3 @2
 pu 3 @0xc000
-Po resetc64
+P resetc64
 echo Loaded `pu 3 @ 0xc000`
 pu 3 @0xc000
 EOF
@@ -249,7 +249,7 @@ e asm.flags = false
 e asm.emu = true
 e dir.projects = .tmp/
 P+ emu > /dev/null
-Po emu
+P emu
 CC-
 om `o~[0]` 0
 pd 1
@@ -269,8 +269,8 @@ af
 afvr edi blahblah typeR @ 0x10002d8d
 afvb 8 ImageHandle blah @ 0x10002d8d
 P+ var > /dev/null
-Pc var~ImageHandle
-Pc var~blahblah
+PS*var~ImageHandle
+PS*var~blahblah
 rm .tmp/var
 EOF
 EXPECT=<<EOF
@@ -288,8 +288,8 @@ e dir.projects = .tmp/
 tk zoby  =  type
 tl char @ 0x0
 P+ types > /dev/null
-Pc types~?link.,symlink,unlink
-Pc types~?zoby
+PS*types~?link.,symlink,unlink
+PS*types~?zoby
 EOF
 EXPECT=<<EOF
 10
@@ -320,7 +320,7 @@ e prj.vc=false
 fV 49 0x400410
 fV 50 0x400412
 P+ vmarks > /dev/null
-Pc vmarks~fV
+PS*vmarks~fV
 P- vmarks > /dev/null
 EOF
 EXPECT=<<EOF
@@ -337,11 +337,11 @@ tk char **=type
 tk type.char **=**z
 tk type.char **.size=64
 P+ ctypes > /dev/null
-Pc ctypes~?char **
+PS* ctypes~?char **
 "td struct Foo { int bar; int x; int y; };"
 P+ ctypes > /dev/null
-Pc ctypes~?char **
-Pc ctypes~?Foo
+PS* ctypes~?char **
+PS* ctypes~?Foo
 P- ctypes > /dev/null
 EOF
 EXPECT=<<EOF
@@ -365,7 +365,7 @@ t- char **
 t- Foo
 tk~?char **
 tk~?Foo
-Po costom_types > /dev/null
+P costom_types > /dev/null
 tk~?char **
 tk~?Foo
 P- costom_types > /dev/null
@@ -388,10 +388,10 @@ o
 P- ulumulu
 P+ ulumulu > /dev/null
 PS*~^o
-Px
+Pc
 o--
 o
-Po ulumulu > /dev/null
+P ulumulu > /dev/null
 ?e files:
 o
 ?e count:
@@ -423,7 +423,7 @@ CMDS=<<EOF
 e prj.vc=false
 e dir.projects = .tmp/
 # Ps blub > /dev/null
-Po blub > /dev/null
+P blub > /dev/null
 i~format
 EOF
 EXPECT=<<EOF
@@ -440,7 +440,7 @@ e scr.interactive=false
 aa
 P+ beer
 e scr.interactive=false
-Po beer
+P beer
 echo Info: `Pi~Info`
 aflc
 e scr.interactive=false
@@ -538,7 +538,7 @@ P- hund
 P+ hund > /dev/null
 CC-$$
 e prj.name= # close current project
-Po hund > /dev/null
+P hund > /dev/null
 pd 4
 om*
 ?e --
@@ -674,7 +674,7 @@ e dir.projects = .tmp/
 e asm.arch=x86
 e asm.bits=16
 P+ sun > /dev/null
-Po sun > /dev/null
+P sun > /dev/null
 e asm.arch
 e asm.bits
 EOF
@@ -691,7 +691,7 @@ e prj.vc=false
 e dir.projects = .tmp/
 P+ namedprj > /dev/null
 e prj.name=
-Po namedprj > /dev/null
+P namedprj > /dev/null
 e prj.name
 rm .tmp/namedprj
 EOF
@@ -706,9 +706,9 @@ CMDS=<<EOF
 e prj.vc=false
 e dir.projects = .tmp/
 P+ stupid > /dev/null
-Po stupid > /dev/null
+P stupid > /dev/null
 P+ stupid > /dev/null
-Po stupid > /dev/null
+P stupid > /dev/null
 e prj.name
 EOF
 EXPECT=<<EOF
@@ -727,7 +727,7 @@ e dir.projects = .tmp/
 wx 5031c0e801000000c3b801000000c3
 af
 P+ dream > /dev/null
-Po dream > /dev/null
+P dream > /dev/null
 axq
 EOF
 EXPECT=<<EOF
@@ -742,7 +742,7 @@ CMDS=<<EOF
 e prj.vc=false
 e dir.projects = .tmp/
 P+ bininfo > /dev/null
-Po bininfo
+P bininfo
 i~?
 ie~?
 ii~?
@@ -763,7 +763,7 @@ e dir.projects = .tmp/
 s main > /dev/null
 CC test
 P+ lapa > /dev/null
-Po lapa
+P lapa
 pd 1 ~test
 rm .tmp/
 EOF
@@ -776,15 +776,16 @@ NAME=Check Pc\'s return value
 FILE=bins/elf/analysis/main
 ARGS=-A -eprj.vc=false -edir.projects=.tmp/
 CMDS=<<EOF
+P- hello
 Pc aabb
 ?v $?
 P+ hello
-Pc hello >/dev/null
+Pc
 ?v $?
 EOF
 EXPECT=<<EOF
-0x1
 0x0
+0x1
 EOF
 RUN
 
@@ -796,10 +797,59 @@ e prj.vc=false
 P- hjkl
 P+ hjkl
 Pi~!/
-Px
+Pc
 Pi
 EOF
 EXPECT=<<EOF
 hjkl
+EOF
+RUN
+
+NAME=Rename
+FILE=bins/elf/analysis/main
+CMDS=<<EOF
+P-hello
+P-world
+e prj.vc = false
+Ps hello
+Ps world
+EOF
+EXPECT_ERR=<<EOF
+WARN: Relocs has not been applied. Please use `-e bin.relocs.apply=true` or `-e bin.cache=true` next time
+EOF
+EXPECT=
+RUN
+
+NAME=delete memory format with Cf-
+FILE=bins/dmg/src/Hello
+CMDS=<<EOF
+e scr.interactive=false
+P-temp_proj
+e prj.vc=false
+e asm.arch=x86
+e asm.bits=64
+e asm.flags.inline=true
+pd 1
+Cf 1 x
+pd 1
+e scr.interactive=false
+P+temp_proj
+Cf-
+pd 1
+f jeje=0
+e scr.interactive=false
+Ps temp_proj
+e scr.interactive=false
+P temp_proj
+f-orax
+pd 1
+EOF
+EXPECT=<<EOF
+            0x00000000      57             push rdi
+            0x00000000 pf x # size=1
+0x00000000 = 0x6c726f57
+            0x00000000      57             push rdi
+            ;-- jeje, rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15, rip, rbp, rflags, rsp:
+            0x00000000      57             push rdi
 EOF
 RUN

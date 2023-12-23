@@ -14,3 +14,48 @@ EXPECT=<<EOF
 0x004009e0 16 Swift.String.init(_builtinStringLiteral: Builtin.RawPointer, byteSize: Builtin.Word, isASCII: Builtin.Int1) -> Swift.String
 EOF
 RUN
+
+NAME=macho swift demangle
+FILE=bins/mach0/swift/klass.orig
+CMDS=ic
+EXPECT=<<EOF
+0x00003cb0 [0x100003cff - 0x100003d90]    145 swift class 0 SomeClass
+0x100003cff swift   method   0      0
+0x100003d08 swift   method   1      1
+0x100003d0e swift   method   2      2
+0x100003d17 swift   method   3      3
+0x100003d20 swift   method   4      4
+0x100003d24 swift   method   5      5
+0x100003d1d swift   method   6      6
+0x100003d90 swift   method   7      allocator
+0x100003d2c swift   method   8      8
+0x100003d34 swift   method   9      9
+0x100003e8d swift property   0      meh
+0x100003e91 swift property   1      cow
+0x00003d44 [0x1000028f0 - 0x100003d9c]   5292 swift class 0 SuperKlass
+0x1000028f0 swift   method   0      superfield.allocator__Swift.Int
+0x100002950 swift   method   1      superfield.allocator__Swift.Int
+0x1000029b0 swift   method   2      superfield.allocator__Swift.Int
+0x100002a10 swift   method   3      allocator
+0x100003d9c swift   method   4      4
+0x100003e95 swift property   0      superfield
+0x100008260 [0x100008260 - 0x100008260]      0 objc class 0 klass.SomeClass :: klass.SuperKlass
+0x00000000 objc      var   0      isa
+0x100003c80 objc      var   1      meh
+0x100003c88 objc      var   2      cow
+0x100008288 [0x100008288 - 0x100008288]      0 objc class 0 klass.SuperKlass :: Swift._SwiftObject
+0x00000000 objc      var   0      isa
+0x100003d30 objc      var   1      superfield
+0x100002ab0 [0x100002ab0 - 0x100002ab0]      0 ? class 4 _swiftoverride_class_getSuperclass(swift
+0x100002ab0 ?   method   0      TargetMetadata<swift::InProcess> const*)
+0x100003620 [0x100003620 - 0x100008558]  20280 ? class 5 getObjCClassMetadata(swift
+0x100003620 ?   method   0      TargetClassMetadata<swift::InProcess> const*)::$_1::operator()() const::{lambda(void*)#1}::__invoke(void*)
+0x100008558 ?   method   1      TargetClassMetadata<swift::InProcess> const*)::$_1::operator()() const::TheLazy
+0x100003670 [0x100003670 - 0x100008578]  20232 ? class 6 getTypeContextDescriptor(swift
+0x100003670 ?   method   0      TargetMetadata<swift::InProcess> const*)::$_2::operator()() const::{lambda(void*)#1}::__invoke(void*)
+0x100008578 ?   method   1      TargetMetadata<swift::InProcess> const*)::$_2::operator()() const::TheLazy
+0x1000036b0 [0x1000036b0 - 0x100008588]  20184 ? class 7 getExistentialTypeMetadata(swift
+0x1000036b0 ?   method   0      ProtocolClassConstraint, swift::TargetMetadata<swift::InProcess> const*, unsigned long, swift::TargetProtocolDescriptorRef<swift::InProcess> const*)::$_3::operator()() const::{lambda(void*)#1}::__invoke(void*)
+0x100008588 ?   method   1      ProtocolClassConstraint, swift::TargetMetadata<swift::InProcess> const*, unsigned long, swift::TargetProtocolDescriptorRef<swift::InProcess> const*)::$_3::operator()() const::TheLazy
+EOF
+RUN

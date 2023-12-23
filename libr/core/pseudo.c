@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015-2021 - pancake */
+/* radare - LGPL - Copyright 2015-2023 - pancake */
 
 #include <r_core.h>
 #define TYPE_NONE 0
@@ -162,7 +162,16 @@ static void find_and_change(char* in, int len) {
 	}
 }
 
-static const char *help_msg_pdc[] = {
+#if 0
+static int cmpnbbs(const void *_a, const void *_b) {
+	const RAnalBlock *a = _a, *b = _b;
+	ut64 as = a->addr;
+	ut64 bs = b->addr;
+	return (as> bs)? -1: (as< bs)? 1: 0;
+}
+#endif
+
+static RCoreHelpMessage help_msg_pdc = {
 	"Usage: pdc[oj]", "", "experimental, unreliable and hacky pseudo-decompiler",
 	"pdc", "", "pseudo decompile function in current offset",
 	"pdcc", "", "pseudo-decompile with C helpers around",
@@ -182,11 +191,12 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		r_core_cmd_help (core, help_msg_pdc);
 		return false;
 	}
+	RStrBuf *out = r_strbuf_new ("");
 #define PRINTF(a, ...) {\
 	if (pj) {\
 		r_strbuf_appendf (codestr, a, ##__VA_ARGS__);\
 	} else {\
-		r_cons_printf (a, ##__VA_ARGS__);\
+		r_strbuf_appendf (out, a, ##__VA_ARGS__);\
 	}}
 #define NEWLINE(a,i) {\
 	size_t eos = R_MIN ((i) * 2, sizeof (indentstr) - 2);\
@@ -196,9 +206,9 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		if (show_addr) r_strbuf_appendf (codestr, "\n0x%08"PFMT64x" | %s", a, indentstr);\
 		else r_strbuf_appendf (codestr, "\n%s", indentstr);\
 	} else {\
-		r_cons_newline();\
-		if (show_addr) r_cons_printf (" 0x%08"PFMT64x" | %s", a, indentstr);\
-		else r_cons_printf ("%s", indentstr); }\
+		r_strbuf_append (out, "\n");\
+		if (show_addr) r_strbuf_appendf (out, " 0x%08"PFMT64x" | %s", a, indentstr);\
+		else r_strbuf_append (out, indentstr); }\
 	}
 	const char *cmdPdc = r_config_get (core->config, "cmd.pdc");
 	if (cmdPdc && *cmdPdc && !strstr (cmdPdc, "pdc")) {
@@ -254,10 +264,6 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	r_config_set_i (core->config, "asm.cmt.col", 30);
 	r_config_set_b (core->config, "io.cache", true);
 	r_core_cmd0 (core, "aeim");
-	PJ *pj = NULL;
-	if (show_json) {
-		pj = r_core_pj_new (core);
-	}
 
 	r_strf_buffer (64);
 	RStrBuf *codestr = r_strbuf_new ("");
@@ -271,12 +277,21 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	char indentstr[1024] = {0};
 	int indent = 0;
 	int nindent = 1;
+	// XXX sorting basic blocks is nice for the reader, but introduces conceptual problems
+	// when the entrypoint is not starting at the lowest address. // r_list_sort (fcn->bbs, cmpnbbs);
 	int n_bb = r_list_length (fcn->bbs);
+	PJ *pj = NULL;
 	if (show_json) {
 		pj = r_core_pj_new (core);
 		pj_o (pj);
 		pj_ka (pj, "annotations");
 	}
+	const char *cc = fcn->cc ? fcn->cc: "default";
+	const char *cc_a0 = r_anal_cc_arg (core->anal, cc, 0, -1);
+	const char *cc_a1 = r_anal_cc_arg (core->anal, cc, 1, -1);
+	const char *a0 = cc_a0? cc_a0: r_reg_get_name_by_type (core->anal->reg, "A0");
+	const char *a1 = cc_a1? cc_a1: r_reg_get_name_by_type (core->anal->reg, "A1");
+	const char *r0 = r_reg_get_name_by_type (core->anal->reg, "R0");
 	if (show_c_headers) {
 		// NEWLINE (fcn->addr, indent);
 		PRINTF ("// global registers\n");
@@ -286,23 +301,21 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		PRINTF ("unsigned int *dword = &stack;\n");
 		PRINTF ("unsigned short *word = &stack;\n");
 		PRINTF ("unsigned char *byte = &stack;\n");
-		PRINTF ("int eax, ebx, ecx, edx;\n");
+		PRINTF ("int %s, %s;\n", a0, a1);
 		PRINTF ("// This function contains %d basic blocks and its %d long.",
 			n_bb, (int)r_anal_function_realsize (fcn));
 		NEWLINE (fcn->addr, indent);
 		const char *S0 = "esp";
-		PRINTF ("static inline void push (int reg) {%s-=%d;stack[%s]=reg;}\n", S0, (int)sizeof (int), S0);
-		PRINTF ("static inline int pop() {int r = stack[%s]; %s+=%d; return r;}\n", S0, S0, (int)sizeof (int));
+		PRINTF ("static inline void push (int reg) {%s -= %d; stack[%s] = reg; }\n", S0, (int)sizeof (int), S0);
+		PRINTF ("static inline int pop() {int r = stack[%s]; %s += %d; return r; }\n", S0, S0, (int)sizeof (int));
 		PRINTF ("\n");
 	}
-	PRINTF ("int %s (int esi, int edx) {", fcn->name);
+
+	PRINTF ("int %s (int %s, int %s) {", fcn->name, a0, a1);
 	indent++;
 	RList *visited = r_list_newf (NULL);
 	ut64 addr = fcn->addr;
-	do {
-		if (!bb) {
-			break;
-		}
+	while (bb) {
 		r_list_append (visited, bb);
 		r_cons_push ();
 		bool html = r_config_get_b (core->config, "scr.html");
@@ -311,22 +324,22 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		r_cons_pop ();
 		r_config_set_b (core->config, "scr.html", html);
 		indent = 2;
-		SET_INDENT (indent);
 		if (!code) {
 			R_LOG_ERROR ("No code here");
 			break;
 		}
+		// SET_INDENT (indent);
+		// PRINTF ("\n---\n");
 		code = r_str_replace (code, ";", "//", true);
-		const char *R0 = "eax";
 		size_t len = strlen (code);
 		code[len - 1] = 0; // chop last newline
 		find_and_change (code, len);
 		if (!sdb_const_get (db, K_MARK (bb->addr), 0)) {
 			bool mustprint = !queuegoto || queuegoto != bb->addr;
 			if (mustprint) {
-				if (queuegoto) {
-					NEWLINE (bb->addr, indent);
-					PRINTF ("goto loc_0x%"PFMT64x, queuegoto);
+				if (queuegoto && queuegoto != UT64_MAX) {
+					// NEWLINE (bb->addr, indent);
+					// PRINTF ("3goto loc_0x%"PFMT64x, queuegoto);
 					queuegoto = 0LL;
 				}
 				NEWLINE (bb->addr, indent - 1);
@@ -345,6 +358,8 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 						char *s = strchr (line, ' ');
 						if (s) {
 							line = r_str_trim_head_ro (s + 1);
+						} else {
+							line = "";
 						}
 					}
 					if (pj) {
@@ -355,18 +370,40 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 						pj_ks (pj, "type", "offset");
 						pj_end (pj);
 					}
-					NEWLINE (addr, indent);
-					PRINTF ("%s", line);
+					if (R_STR_ISNOTEMPTY (line)) {
+						NEWLINE (addr, indent);
+						PRINTF ("%s", line);
+					}
 				}
 				r_list_free (lines);
 				free (code);
 				sdb_num_set (db, K_MARK (bb->addr), 1, 0);
 			}
 		}
+		bool closed = false;
+		if (bb->fail == UT64_MAX) {
+			if (bb->jump != UT64_MAX) {
+#if 1
+				if (bb->jump != UT64_MAX) { // nbb->addr) {
+					NEWLINE (bb->addr, indent);
+					PRINTF ("goto loc_0x%"PFMT64x, bb->jump);
+				}
+#endif
+			} else {
+				closed = true;
+#if 0
+				NEWLINE (bb->addr, indent);
+				PRINTF ("return; ");
+#endif
+			}
+		} else {
+			NEWLINE (bb->addr, indent);
+			PRINTF ("goto loc_0x%"PFMT64x, bb->fail);
+		}
 		if (sdb_const_get (db, K_INDENT (bb->addr), 0)) {
 			// already analyzed, go pop and continue
 			// XXX check if can't pop
-			R_LOG_DEBUG ("%s// 0x%08llx already analyzed", indentstr, bb->addr);
+			R_LOG_DEBUG ("%s// 0x%08"PFMT64x" already analyzed", indentstr, bb->addr);
 			ut64 addr = sdb_array_pop_num (db, "indent", NULL);
 			if (addr == UT64_MAX) {
 				int i;
@@ -374,9 +411,15 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 				for (i = indent; i != nindent && i > 0; i--) {
 					NEWLINE (bb->addr, i);
 					PRINTF ("}");
+					closed = true;
 				}
-				NEWLINE (bb->addr, indent);
-				PRINTF ("return %s;", R0);
+				if (closed) {
+					NEWLINE (bb->addr, indent);
+					PRINTF ("return %s;", r0);
+				} else if (bb->fail != UT64_MAX) {
+					NEWLINE (bb->addr, indent);
+					PRINTF ("goto loc_0x%"PFMT64x";", bb->fail);
+				}
 				RAnalBlock *nbb = r_anal_bb_from_offset (core->anal, bb->fail);
 				if (r_list_contains (visited, nbb)) {
 					nbb = r_anal_bb_from_offset (core->anal, bb->jump);
@@ -398,13 +441,10 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 				} else {
 					PRINTF (" // } %s (?);", blocktype);
 				}
-			} else {
-				NEWLINE (addr, indent);
-				PRINTF (" // }");
 			}
 			if (addr != bb->addr) {
 				queuegoto = addr;
-				// r_cons_printf ("\n%s  goto loc_0x%llx", indentstr, addr);
+				// r_cons_printf ("\n%s  goto loc_0x%"PFMT64x, indentstr, addr);
 			}
 			bb = r_anal_bb_from_offset (core->anal, addr);
 			if (!bb) {
@@ -459,7 +499,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 							sdb_array_push_num (db, "indent", fail, 0);
 							sdb_num_set (db, K_INDENT (fail), indent, 0);
 							sdb_num_set (db, K_ELSE (fail), 1, 0);
-							NEWLINE (bb->addr, indent);
+				//			NEWLINE (bb->addr, indent);
 						}
 					} else {
 						sdb_array_push_num (db, "indent", jump, 0);
@@ -471,15 +511,16 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 							blocktype = "else";
 						}
 						NEWLINE (bb->addr, indent);
-						PRINTF (" // do {");
+						PRINTF ("do {");
+						indent++;
 						indent++;
 					}
 				}
-			} else {
+			} else if (!closed) {
 				ut64 addr = sdb_array_pop_num (db, "indent", NULL);
 				if (addr == UT64_MAX) {
 					NEWLINE (bb->addr, indent);
-					PRINTF (" // (break)");
+					PRINTF ("break;");
 					break;
 				}
 				bb = r_anal_bb_from_offset (core->anal, addr);
@@ -491,36 +532,41 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 						PRINTF ("}");
 					}
 				}
+				PRINTF ("goto loc_0x%"PFMT64x";", bb->fail);
 				if (nindent != indent) {
 					NEWLINE (bb->addr, indent);
-					PRINTF (" // } else {");
+					PRINTF ("} else {");
 				}
 				indent = nindent;
 			}
 		}
-		//n_bb --;
-	} while (n_bb > 0);
+	}
 	RListIter *iter;
-	size_t orphan = 0;
 	r_list_foreach (fcn->bbs, iter, bb) {
 		if (!r_list_contains (visited, bb)) {
-			orphan ++;
 			char *s = r_core_cmd_strf (core, "pdb@0x%08"PFMT64x"@e:asm.offset=0", bb->addr);
 			s = r_str_replace (s, ";", "//", true);
+			s = r_str_replace (s, "goto ", "goto loc_", true);
 			char *os = r_str_prefix_all (s, indentstr);
 			free (s);
 			s = os;
+			size_t codelen = r_strbuf_length (codestr);
 			if (pj) {
 				pj_o (pj);
-				pj_kn (pj, "start", r_strbuf_length (codestr));
+				pj_kn (pj, "start", codelen);
 				r_strbuf_append (codestr, s);
-				pj_kn (pj, "end", r_strbuf_length (codestr));
+				pj_kn (pj, "end", codelen);
 				pj_kn (pj, "offset", addr);
 				pj_ks (pj, "type", "offset");
 				pj_end (pj);
+			} else {
+				r_strbuf_append (codestr, s);
+				// PRINTF ("goto loc_0x%"PFMT64x";", bb->fail);
 			}
-			NEWLINE (bb->addr, 1);
-			PRINTF ("loc_0x%08"PFMT64x": // orphan\n%s", bb->addr, s);
+			if (codelen > 0) {
+				NEWLINE (bb->addr, 1);
+				PRINTF ("loc_0x%08"PFMT64x": // orphan\n%s", bb->addr, s);
+			}
 			free (s);
 		}
 	}
@@ -528,6 +574,8 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	indent = 0;
 	NEWLINE (addr, indent);
 	PRINTF ("}\n");
+	r_config_hold_restore (hc);
+	r_config_hold_free (hc);
 	if (pj) {
 		pj_end (pj);
 		char *kode = r_strbuf_drain (codestr);
@@ -537,9 +585,18 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		r_cons_printf ("%s\n", j);
 		free (kode);
 		free (j);
+		r_strbuf_free (out);
+	} else {
+		char *s = r_strbuf_drain (out);
+		if (r_config_get_i (core->config, "scr.color") > 0) {
+			char *ss = r_print_code_tocolor (s);
+			free (s);
+			s = ss;
+		}
+		r_cons_printf ("%s\n", s);
+		free (s);
+		r_strbuf_free (codestr);
 	}
-	r_config_hold_restore (hc);
-	r_config_hold_free (hc);
 	sdb_free (db);
 	return true;
 }

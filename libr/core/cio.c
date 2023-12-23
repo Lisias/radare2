@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2022 - pancake */
+/* radare2 - LGPL - Copyright 2009-2023 - pancake */
 
 #include "r_core.h"
 
@@ -122,7 +122,7 @@ R_API ut8* r_core_transform_op(RCore *core, const char *arg, char op) {
 	const char *plus = arg? strchr (arg, '+'): NULL;
 	int numsize = 1;
 	if (plus) {
-		numsize = (*arg=='+')? 1: atoi (arg);
+		numsize = (*arg == '+')? 1: atoi (arg);
 		if (numsize < 1) {
 			numsize = 1;
 		}
@@ -145,17 +145,18 @@ R_API ut8* r_core_transform_op(RCore *core, const char *arg, char op) {
 		if (arg && !isnum) {  // parse arg for key
 			// r_hex_str2bin() is guaranteed to output maximum half the
 			// input size, or 1 byte if there is just a single nibble.
-			str = (char *)malloc ((strlen (arg) / 2) + 1);
+			str = (char *)malloc (((strlen (arg) + 2) / 2) + 1);
 			if (!str) {
 				goto beach;
 			}
-			len = r_hex_str2bin (arg, (ut8 *)str);
+			int xlen = r_hex_str2bin (arg, (ut8 *)str);
 			// Output is invalid if there was just a single nibble,
 			// but in that case, len is negative (-1).
-			if (len <= 0) {
+			if (xlen <= 0) {
 				R_LOG_ERROR ("Invalid hexpair string");
 				goto beach;
 			}
+			len = xlen;
 		} else {  // use clipboard as key
 			const ut8 *tmp = r_buf_data (core->yank_buf, &len);
 			str = r_mem_dup (tmp, len);
@@ -270,36 +271,39 @@ R_API ut8* r_core_transform_op(RCore *core, const char *arg, char op) {
 	} else {
 		if (isnum) {
 			ut64 n = r_num_math (core->num, arg);
-			bool be = r_config_get_i (core->config, "cfg.bigendian");
+			bool be = r_config_get_b (core->config, "cfg.bigendian");
 			free (str);
+			len = 0;
 			str = calloc (8, 1);
-			switch (numsize) {
-			case 1:
-				if (n > UT8_MAX) {
-					R_LOG_ERROR ("%d doesnt fit in ut8.max", n);
-					goto beach;
+			if (R_LIKELY (str)) {
+				switch (numsize) {
+				case 1:
+					if (n > UT8_MAX) {
+						R_LOG_ERROR ("%d doesnt fit in ut8.max", n);
+						goto beach;
+					}
+					str[0] = n;
+					break;
+				case 2:
+					if (n > UT16_MAX) {
+						R_LOG_ERROR ("%d doesnt fit in ut16.max", n);
+						goto beach;
+					}
+					r_write_ble16 (str, n, be);
+					break;
+				case 4:
+					if (n > UT32_MAX) {
+						R_LOG_ERROR ("%d doesnt fit in ut32.max", n);
+						goto beach;
+					}
+					r_write_ble32 (str, n, be);
+					break;
+				case 8:
+					r_write_ble64 (str, n, be);
+					break;
 				}
-				str[0] = n;
-				break;
-			case 2:
-				if (n > UT16_MAX) {
-					R_LOG_ERROR ("%d doesnt fit in ut16.max", n);
-					goto beach;
-				}
-				r_write_ble16 (str, n, be);
-				break;
-			case 4:
-				if (n > UT32_MAX) {
-					R_LOG_ERROR ("%d doesnt fit in ut32.max", n);
-					goto beach;
-				}
-				r_write_ble32 (str, n, be);
-				break;
-			case 8:
-				r_write_ble64 (str, n, be);
-				break;
+				len = numsize;
 			}
-			len = numsize;
 		}
 		for (i = j = 0; i < core->blocksize; i++) {
 			switch (op) {
@@ -381,10 +385,14 @@ R_API void r_core_seek_arch_bits(RCore *core, ut64 addr) {
 	const char *arch = NULL;
 	r_core_arch_bits_at (core, addr, &bits, &arch);
 	if (bits) {
-		r_config_set_i (core->config, "asm.bits", bits);
+		if (bits != core->anal->config->bits) {
+			r_config_set_i (core->config, "asm.bits", bits);
+		}
 	}
 	if (arch) {
-		r_config_set (core->config, "asm.arch", arch);
+		if (core->anal->config->arch && strcmp (arch, core->anal->config->arch)) {
+			r_config_set (core->config, "asm.arch", arch);
+		}
 	}
 }
 
@@ -394,6 +402,7 @@ R_API bool r_core_seek(RCore *core, ut64 addr, bool rb) {
 		r_core_block_read (core);
 	}
 	if (core->binat) {
+		// XXX wtf is this code doing here
 		RBinFile *bf = r_bin_file_at (core->bin, core->offset);
 		if (bf) {
 			core->bin->cur = bf;
@@ -440,10 +449,11 @@ R_API bool r_core_write_at(RCore *core, ut64 addr, const ut8 *buf, int size) {
 }
 
 R_API bool r_core_extend_at(RCore *core, ut64 addr, int size) {
-	if (!core->io || !core->io->desc || size < 1) {
+	r_return_val_if_fail (core && core->io, false);
+	if (!core->io->desc || size < 1 || addr == UT64_MAX) {
 		return false;
 	}
-	int io_va = r_config_get_i (core->config, "io.va");
+	const bool io_va = r_config_get_b (core->config, "io.va");
 	if (io_va) {
 		RIOMap *map = r_io_map_get_at (core->io, core->offset);
 		if (map) {
@@ -452,24 +462,24 @@ R_API bool r_core_extend_at(RCore *core, ut64 addr, int size) {
 		r_config_set_i (core->config, "io.va", false);
 	}
 	int ret = r_io_extend_at (core->io, addr, size);
-	if (addr >= core->offset && addr <= core->offset+core->blocksize) {
+	if (addr >= core->offset && addr <= core->offset + core->blocksize) {
 		r_core_block_read (core);
 	}
-	r_config_set_i (core->config, "io.va", io_va);
+	r_config_set_b (core->config, "io.va", io_va);
 	return ret;
 }
 
-R_API int r_core_shift_block(RCore *core, ut64 addr, ut64 b_size, st64 dist) {
+R_API bool r_core_shift_block(RCore *core, ut64 addr, ut64 b_size, st64 dist) {
 	// bstart - block start, fstart file start
 	ut64 fend = 0, fstart = 0, bstart = 0, file_sz = 0;
 	ut8 * shift_buf = NULL;
-	int res = false;
+	bool res = false;
 
 	if (!core->io || !core->io->desc) {
 		return false;
 	}
 
-	if (b_size == 0 || b_size == (ut64) -1) {
+	if (b_size == 0 || b_size == UT64_MAX) {
 		r_io_use_fd (core->io, core->io->desc->fd);
 		file_sz = r_io_size (core->io);
 		if (file_sz == UT64_MAX) {

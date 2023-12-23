@@ -21,10 +21,9 @@ iij
 EOF
 EXPECT=<<EOF
 [Imports]
-nth vaddr      bind type lib name
----------------------------------
-0   0x00000000 NONE NONE     
+nth vaddr bind type lib name
+----------------------------
 
-[{"ordinal":0,"name":"","plt":0}]
+[]
 EOF
 RUN

@@ -57,10 +57,7 @@ typedef struct r_fs_root_t {
 } RFSRoot;
 
 typedef struct r_fs_plugin_t {
-	const char *name;
-	const char *desc;
-	const char *author;
-	const char *license;
+	RPluginMeta meta;
 	RFSFile* (*slurp)(RFSRoot *root, const char *path);
 	RFSFile* (*open)(RFSRoot *root, const char *path, bool create);
 	bool (*unlink)(RFSRoot *root, const char *path);
@@ -136,7 +133,8 @@ R_API RFS *r_fs_new(void);
 R_API void r_fs_free(RFS* fs);
 
 R_API void r_fs_view(RFS* fs, int view);
-R_API void r_fs_add(RFS *fs, RFSPlugin *p);
+R_API bool r_fs_plugin_add(RFS *fs, RFSPlugin *p);
+R_API bool r_fs_plugin_remove(RFS *fs, RFSPlugin *p);
 R_API void r_fs_del(RFS *fs, RFSPlugin *p);
 
 R_API RFSRoot *r_fs_mount(RFS* fs, const char *fstype, const char *path, ut64 delta);

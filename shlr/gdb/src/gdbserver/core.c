@@ -99,7 +99,7 @@ static int _server_handle_M(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *core_
 	}
 	snprintf (buf, memlen2 + 63, "wx 0x%s @ 0x%"PFMT64x, memstr, addr);
 	buf[memlen2 + 63] = '\0';
-	eprintf ("buf: %s\n", buf);
+	R_LOG_DEBUG ("%s: buf: %s", __func__, buf);
 	if (cmd_cb (g, core_ptr, buf, NULL, 0) < 0) {
 		free (buf);
 		return send_msg (g, "E01");
@@ -227,6 +227,7 @@ static int _server_handle_z(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *core_
 
 static int _server_handle_vCont(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *core_ptr) {
 	char *action = NULL;
+	char *save_ptr = NULL;
 	if (send_ack (g) < 0) {
 		return -1;
 	}
@@ -235,11 +236,11 @@ static int _server_handle_vCont(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *c
 		// Query about everything we support
 		return send_msg (g, "vCont;c;s");
 	}
-	if (!(action = strtok (g->data, ";"))) {
+	if (!(action = r_str_tok_r (g->data, ";", &save_ptr))) {
 		return send_msg (g, "E01");
 	}
-	while ((action = strtok (NULL, ";"))) {
-		eprintf ("action: %s\n", action);
+	while ((action = r_str_tok_r (NULL, ";", &save_ptr))) {
+		R_LOG_DEBUG ("%s: action: %s", __func__, action);
 		switch (action[0]) {
 		case 's':
 			// TODO handle thread selections
@@ -638,9 +639,7 @@ int gdbr_server_serve(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *core_ptr) {
 				return -1;
 			}
 			g->no_ack = true;
-			if (g->server_debug) {
-				eprintf ("[noack mode enabled]\n");
-			}
+			R_LOG_DEBUG ("[noack mode enabled]");
 			if (send_msg (g, "OK") < 0) {
 				return -1;
 			}
@@ -649,7 +648,7 @@ int gdbr_server_serve(libgdbr_t *g, gdbr_server_cmd_cb cmd_cb, void *core_ptr) {
 		// Unrecognized packet
 		if (send_ack (g) < 0 || send_msg (g, "") < 0) {
 			g->data[g->data_len] = '\0';
-			eprintf ("Unknown packet: %s\n", g->data);
+			R_LOG_ERROR ("%s: Unknown packet: %s", __func__, g->data);
 			return -1;
 		}
 	};

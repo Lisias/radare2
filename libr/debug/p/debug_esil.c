@@ -1,5 +1,4 @@
-/* radare - LGPL - Copyright 2013-2021 pancake */
-// r2 -Desil ls
+/* radare - LGPL - Copyright 2013-2023 pancake */
 
 #include <r_asm.h>
 #include <r_debug.h>
@@ -37,7 +36,7 @@ static bool __esil_step(RDebug *dbg) {
 	if (oplen > 0) {
 		if (*R_STRBUF_SAFEGET (&op.esil)) {
 			eprintf ("ESIL: %s\n", R_STRBUF_SAFEGET (&op.esil));
-			r_anal_esil_parse (dbg->anal->esil, R_STRBUF_SAFEGET (&op.esil));
+			r_esil_parse (dbg->anal->esil, R_STRBUF_SAFEGET (&op.esil));
 		}
 	}
 	r_anal_op_fini (&op);
@@ -46,7 +45,8 @@ static bool __esil_step(RDebug *dbg) {
 }
 
 static bool __esil_init(RDebug *dbg) {
-	dbg->tid = dbg->pid = 1;
+	R_LOG_DEBUG ("esil_init");
+	// dbg->tid = dbg->pid = 1;
 	// aeim
 	// aei
 	return true;
@@ -121,7 +121,7 @@ static bool __esil_kill(RDebug *dbg, int pid, int tid, int sig) {
 	return true;
 }
 
-static int __esil_stop(RDebug *dbg) {
+static bool __esil_stop(RDebug *dbg) {
 	eprintf ("ESIL: stop\n");
 	return true;
 }
@@ -136,11 +136,15 @@ static bool __reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 }
 
 RDebugPlugin r_debug_plugin_esil = {
-	.name = "esil",
-	.license = "LGPL3",
+	.meta = {
+		.name = "esil",
+		.author = "pancake",
+		.desc = "esil debug plugin",
+		.license = "LGPL3",
+	},
 	.arch = "any", // TODO: exception!
 	.bits = R_SYS_BITS_32 | R_SYS_BITS_64,
-	.init = __esil_init,
+	.init_debugger = __esil_init,
 	.step = __esil_step,
 	.step_over = __esil_step_over,
 	.cont = __esil_continue,

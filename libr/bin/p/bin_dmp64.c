@@ -1,25 +1,21 @@
-/* radare2 - LGPL - Copyright 2020 - abcSup */
+/* radare2 - LGPL - Copyright 2020-2023 - abcSup */
 
-#include <r_types.h>
-#include <r_util.h>
-#include <r_util/r_print.h>
-#include <r_lib.h>
 #include <r_bin.h>
 
 #include "dmp/dmp64.h"
 
 static Sdb *get_sdb(RBinFile *bf) {
-	r_return_val_if_fail (bf && bf->o, NULL);
-	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->o->bin_obj;
+	r_return_val_if_fail (bf && bf->bo, NULL);
+	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->bo->bin_obj;
 	return (obj && obj->kv) ? obj->kv: NULL;
 }
 
 static void destroy(RBinFile *bf) {
-	r_bin_dmp64_free ((struct r_bin_dmp64_obj_t*)bf->o->bin_obj);
+	r_bin_dmp64_free ((struct r_bin_dmp64_obj_t*)bf->bo->bin_obj);
 }
 
 static void header(RBinFile *bf) {
-	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->o->bin_obj;
+	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->bo->bin_obj;
 	struct r_bin_t *rbin = bf->rbin;
 	rbin->cb_printf ("DUMP_HEADER64:\n");
 	rbin->cb_printf ("  MajorVersion : 0x%08"PFMT32x"\n", obj->header->MajorVersion);
@@ -53,7 +49,7 @@ static RBinInfo *info(RBinFile *bf) {
 	if (!(ret = R_NEW0 (RBinInfo))) {
 		return NULL;
 	}
-	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->o->bin_obj;
+	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->bo->bin_obj;
 
 	ret->arch = strdup ("x86");
 	ret->bits = 64;
@@ -90,7 +86,7 @@ static RList *sections(RBinFile *bf) {
 	RList *ret;
 	RListIter *it;
 	RBinSection *ptr;
-	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->o->bin_obj;
+	struct r_bin_dmp64_obj_t *obj = (struct r_bin_dmp64_obj_t *)bf->bo->bin_obj;
 
 	if (!(ret = r_list_newf (free))) {
 		return NULL;
@@ -114,18 +110,18 @@ static RList *sections(RBinFile *bf) {
 	return ret;
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	r_return_val_if_fail (buf, false);
 	struct r_bin_dmp64_obj_t *res = r_bin_dmp64_new_buf (buf);
 	if (res) {
-		sdb_ns_set (sdb, "info", res->kv);
-		*bin_obj = res;
+		sdb_ns_set (bf->sdb, "info", res->kv);
+		bf->bo->bin_obj = res;
 		return true;
 	}
 	return false;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	ut8 magic[8];
 	if (r_buf_read_at (b, 0, magic, sizeof (magic)) == 8) {
 		return !memcmp (magic, DMP64_MAGIC, 8);
@@ -134,15 +130,17 @@ static bool check_buffer(RBinFile *bf, RBuffer *b) {
 }
 
 RBinPlugin r_bin_plugin_dmp64 = {
-	.name = "dmp64",
-	.desc = "Windows Crash Dump x64 r_bin plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "dmp64",
+		.desc = "Windows Crash Dump x64 r_bin plugin",
+		.license = "LGPL3",
+	},
 	.destroy = &destroy,
 	.get_sdb = &get_sdb,
 	.header = &header,
 	.info = &info,
-	.load_buffer = &load_buffer,
-	.check_buffer = &check_buffer,
+	.load = &load,
+	.check = &check,
 	.sections = &sections
 };
 

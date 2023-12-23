@@ -11,7 +11,7 @@ Enable asm.trace to see the tracing information inside the disassembly
 Change the registers of the child process in this way: 'dr eax=0x333'
 Check your IO plugins with 'r2 -L'
 Change the size of the file with the 'r' (resize) command
-Calculate checksums for the current block with the commands starting with '#' (#md5, #crc32, #all, ..)
+Calculate current basic block checksum with the ph command (ph md5, ph crc32, ..)
 Use +,-,*,/ to change the size of the block
 Change the block size with 'b <block-size>'. In visual mode you can also enter radare2 command pressing the ':' key (like vi does)
 If you want to open the file in read-write mode, invoke r2 with '-w'
@@ -83,5 +83,6 @@ The more 'a' you add after 'aa' the more analysis steps are executed.
 Review all the subcommands of aa to see better ways to analyze your targets.
 Use /m to carve for known magic headers. speedup with search.
 You can use registers in math expressions. For example: 'wx 1234 @ esp - 2'
-For HTTP authentification 'e http.auth = 1', 'e http.authfile = <path>'
+For HTTP authentication 'e http.auth = 1', 'e http.authfile = <path>'
 Tip: do 'r2pm -i r2premium; echo "e cfg.fortunes.type = nsfw" >> ~/.radare2rc' for a premium r2 experience
+Use the `:` command To run the io plugin cmd callback, many io plugins provide useful features, find them out!

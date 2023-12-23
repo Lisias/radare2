@@ -34,7 +34,7 @@ int pids_sons_of_r(int pid, int recursive, int limit) {
 	while ((file = (struct dirent *)readdir (dh))) {
 		p = atoi (file->d_name);
 		if (p) {
-			sprintf (buf, "/proc/%s/stat", file->d_name);
+			snprintf (buf, sizeof (buf), "/proc/%s/stat", file->d_name);
 			fd = fopen (buf, "r");
 			if (fd) {
 				mola = 0;
@@ -44,14 +44,14 @@ int pids_sons_of_r(int pid, int recursive, int limit) {
 					pids_cmdline (p, tmp2);
 					cons_printf (" `- %d : %s (%s)\n",
 							p, tmp2,
-							(tmp3[0]=='S')
+							(tmp3[0] == 'S')
 								? "sleeping"
-								: (tmp3[0]=='T')
+								: (tmp3[0] == 'T')
 									? "stopped"
 									: "running");
 					n++;
 					if (recursive<limit) {
-						n += pids_sons_of_r (p, recursive+1, limit);
+						n += pids_sons_of_r (p, recursive + 1, limit);
 					}
 				}
 			}

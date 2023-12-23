@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2020 - pancake, ret2libc */
+/* radare - LGPL - Copyright 2007-2023 - pancake, ret2libc, condret */
 
 #include <r_util.h>
 
@@ -311,4 +311,166 @@ R_API void r_graph_dfs(RGraph *g, RGraphVisitor *vis) {
 		}
 		free (color);
 	}
+}
+
+typedef struct _dfs_inserter {
+	RGraph *g;
+	HtUP *reverse;	//reverse lookup of nodes
+//	RList *mo;	//multiple out nodes
+	RList *mi;	//multiple in nodes
+	ut32 idx;
+	bool fail;
+} DfsInserter;
+
+static void _dfs_ins_node(RGraphNode *n, RGraphVisitor *vi) {
+	DfsInserter *di = (DfsInserter *)vi->data;
+	if (di->fail) {
+		return;
+	}
+	RGraphDomNode *dn = R_NEW0 (RGraphDomNode);
+	if (!dn) {
+		di->fail = true;
+		return;
+	}
+	RGraphNode *node = r_graph_add_nodef (di->g, dn, free);
+	if (!node) {
+		free (dn);
+		di->fail = true;
+		return;
+	}
+	dn->node = n;
+	ht_up_insert (di->reverse, (ut64)(size_t)n, node);
+	if ((r_list_length (n->in_nodes) > 1 ) && (di->idx)) {
+		r_list_append (di->mi, node);
+	}
+	dn->idx = di->idx++;
+}
+
+static void _dfs_ins_edge(const RGraphEdge *e, RGraphVisitor *vi) {
+	DfsInserter *di = (DfsInserter *)vi->data;
+	if (di->fail) {
+		return;
+	}
+	bool found;
+	RGraphNode *from = (RGraphNode *)ht_up_find (di->reverse, (ut64)(size_t)e->from, &found);
+	if (!found) {
+		_dfs_ins_node (e->from, vi);
+		if (di->fail) {
+			return;
+		}
+		from = (RGraphNode *)ht_up_find (di->reverse, (ut64)(size_t)e->from, &found);
+		if (!found) {
+			return;
+		}
+	}
+	RGraphNode *to = (RGraphNode *)ht_up_find (di->reverse, (ut64)(size_t)e->to, &found);
+	if (!found) {
+		_dfs_ins_node (e->to, vi);
+		if (di->fail) {
+			return;
+		}
+		to = (RGraphNode *)ht_up_find (di->reverse, (ut64)(size_t)e->to, &found);
+		if (!found) {
+			return;
+		}
+	}
+	r_graph_add_edge (di->g, from, to);
+}
+
+R_API RGraph *r_graph_dom_tree(RGraph *graph, RGraphNode *root) {
+	r_return_val_if_fail (graph && root, NULL);
+	RGraph *g = r_graph_new ();
+	if (!g) {
+		return NULL;
+	}
+	DfsInserter di = {g, ht_up_new0 (), r_list_new (), 0, false};
+	if (!di.mi) {
+		ht_up_free (di.reverse);
+		r_graph_free (g);
+		return NULL;
+	}
+	if (!di.reverse) {
+		r_list_free (di.mi);
+		r_graph_free (g);
+		return NULL;
+	}
+	RGraphVisitor vi = { NULL, NULL, _dfs_ins_edge, NULL, NULL, &di};
+	//create a spanning tree
+	r_graph_dfs_node (graph, root, &vi);
+	if (di.fail) {
+		r_list_free (di.mi);
+		ht_up_free (di.reverse);
+		r_graph_free (g);
+		return NULL;
+	}
+	while (r_list_length (di.mi)) {
+		RGraphNode *n = r_list_pop_head (di.mi);
+		RGraphNode *p = (RGraphNode *)r_list_get_n (n->in_nodes, 0);
+		if (p && ((RGraphDomNode *)(p->data))->idx == 0) {
+			//parent is root node
+			continue;
+		}
+		RGraphDomNode *dn = (RGraphDomNode *)n->data;
+		RGraphNode *max_n = NULL, *min_n = NULL;
+		RListIter *iter;
+		RGraphNode *nn;
+		r_list_foreach (dn->node->in_nodes, iter, nn) {
+			RGraphNode *in = (RGraphNode *)ht_up_find (di.reverse, (ut64)(size_t)nn, NULL);
+			if (nn == root) {
+				r_graph_del_edge (g, (RGraphNode *)r_list_get_n (n->in_nodes, 0), n);
+				r_graph_add_edge (g, in, n);
+				goto cont;
+			}
+			if (!max_n || (((RGraphDomNode *)(max_n->data))->idx < ((RGraphDomNode *)(in->data))->idx)) {
+				max_n = in;
+			}
+			if (!min_n || (((RGraphDomNode *)(min_n->data))->idx > ((RGraphDomNode *)(in->data))->idx)) {
+				min_n = in;
+			}
+		}
+		while (((RGraphDomNode *)max_n->data)->idx > dn->idx) {
+			max_n = (RGraphNode *)r_list_get_n (max_n->in_nodes, 0);
+		}
+// at this point max_n refers to the semi dominator (i hope this is correct)
+		RGraphNode *dom = min_n;
+		while (((RGraphDomNode *)max_n->data)->idx < ((RGraphDomNode *)dom->data)->idx) {
+			dom = (RGraphNode *)r_list_get_n (dom->in_nodes, 0);
+		}
+// dom <= sdom
+		r_graph_del_edge (g, p, n);
+		r_graph_add_edge (g, dom, n);
+cont:;
+	}
+	r_list_free (di.mi);
+	ht_up_free (di.reverse);
+	RListIter *iter;
+	RGraphNode *n;
+	r_list_foreach (g->nodes, iter, n) {
+		RGraphDomNode *dn = (RGraphDomNode *)n->data;
+		n->free = NULL;
+		n->data = dn->node;
+		free (dn);
+	}
+	return g;
+}
+
+static void _invert_edges (RGraph *g) {
+	RListIter *iter;
+	RGraphNode *n;
+	r_list_foreach (g->nodes, iter, n) {
+		n->in_nodes = (RList *)(((size_t)n->in_nodes) ^ ((size_t)n->out_nodes));
+		n->out_nodes = (RList *)(((size_t)n->in_nodes) ^ ((size_t)n->out_nodes));
+		n->in_nodes = (RList *)(((size_t)n->in_nodes) ^ ((size_t)n->out_nodes));
+	}
+}
+
+R_API RGraph *r_graph_pdom_tree(RGraph *graph, RGraphNode *root) {
+	r_return_val_if_fail (graph && root, NULL);
+	_invert_edges (graph);
+	RGraph *g = r_graph_dom_tree (graph, root);
+	_invert_edges (graph);
+	if (g) {
+		_invert_edges (graph);
+	}
+	return g;
 }

@@ -11,11 +11,11 @@ FILE=bins/mdmp/calc.dmp
 CMDS=iI
 EXPECT=<<EOF
 arch     x86
-baddr    0xffffffffffffffff
 binsz    36724
 bintype  mdmp
 bits     64
 canary   false
+injprot  false
 retguard false
 crypto   false
 endian   little
@@ -43,7 +43,7 @@ NAME=: sections
 FILE=bins/mdmp/calc.dmp
 CMDS=iS~calc
 EXPECT=<<EOF
-9   0x00000000   0xe3000 0xfffe0000      0xe3000 ---- C:\Windows\System32\calc.exe
+9   0x00000000   0xe3000 0xfffe0000      0xe3000 ---- ---- C:\Windows\System32\calc.exe
 EOF
 RUN
 
@@ -349,7 +349,7 @@ EXPECT=<<EOF
             0x7fefdb0a1a8      4c89442420     mov qword [rsp + 0x20], r8
             0x7fefdb0a1ad      4c8bc2         mov r8, rdx
             0x7fefdb0a1b0      488bd1         mov rdx, rcx
-            0x7fefdb0a1b3      488d0dea7ffa.  lea rcx, [0x7fefdab21a4]
+            0x7fefdb0a1b3      488d0dea7f..   lea rcx, [0x7fefdab21a4]
             0x7fefdb0a1ba      4533c9         xor r9d, r9d
             0x7fefdb0a1bd      e87efdffff     call 0x7fefdb09f40
             0x7fefdb0a1c2      4883c438       add rsp, 0x38

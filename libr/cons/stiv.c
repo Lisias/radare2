@@ -7,7 +7,7 @@
 #define ABS(x) (((x)<0)?-(x):(x))
 #define POND(x,y) (ABS((x)) * (y))
 
-static R_TH_LOCAL void (*renderer)(PrintfCallback cb_printf, const ut8*, const ut8 *);
+typedef void (*Renderer)(PrintfCallback cb_printf, const ut8*, const ut8 *);
 
 static int reduce8(int r, int g, int b) {
 	int colors_len = 8;
@@ -69,6 +69,19 @@ static int rgb(int r, int g, int b) {
 	return 16 + (r * 36) + (g * 6) + b;
 }
 
+static void render_sixel(PrintfCallback cb_printf, const ut8 *c, const ut8 *d) {
+	int r = (c[0] * 100 / 255);
+	int g = (c[1] * 100 / 255);
+	int b = (c[2] * 100 / 255);
+	cb_printf ("#0;2;%d;%d;%d", r, g, b); // bg is black
+	r = (d[1] * 100 / 255);
+	g = (d[2] * 100 / 255);
+	b = (d[3] * 100 / 255);
+	cb_printf ("#1;2;%d;%d;%d", r, g, b); // fg is color
+	// cb_printf ("#%d!6%c", 1, 0x3f); // 6x6 pixel block
+	cb_printf ("#%d~~~~~~", 1); // 6x6 pixel block
+}
+
 static void render_256(PrintfCallback cb_printf, const ut8 *c, const ut8 *d) {
 	cb_printf ("\x1b[%d;5;%dm", 38, rgb (c[0], c[1], c[2]));
 	cb_printf ("\x1b[%d;5;%dm", 48, rgb (d[0], d[1], d[2]));
@@ -107,9 +120,25 @@ static void render_ascii(PrintfCallback cb_printf, const ut8 *c, const ut8 *d) {
 	cb_printf ("%c", pal[idx]);
 }
 
-static void dorender(PrintfCallback cb_printf, const ut8 *buf, int len, int w, int h) {
+static void do_render(Renderer renderer, PrintfCallback cb_printf, const ut8 *buf, int len, int w, int h) {
 	const ut8 *c, *d;
 	int x, y;
+	if (renderer == render_sixel) {
+		cb_printf ("\x1bPq");
+		for (y = 0; y < h; y += 6) {
+			for (x = 0; x < w; x+=3) {
+				c = XY (buf, x, y);
+				d = XY (buf, x, y + 1);
+				if (d + 3 > (buf + len)) {
+					break;
+				}
+				render_sixel (cb_printf, c, d);
+			}
+			cb_printf ("$-");
+		}
+		cb_printf ("\x1b\\\n");
+		return;
+	}
 	for (y = 0; y < h; y += 2) {
 		for (x = 0; x < w; x++) {
 			c = XY (buf, x, y);
@@ -126,30 +155,27 @@ static void dorender(PrintfCallback cb_printf, const ut8 *buf, int len, int w, i
 	}
 }
 
-static void selectrenderer(int mode) {
+static Renderer select_renderer(int mode) {
 	switch (mode) {
 	case 'a':
-		renderer = render_ascii;
-		break;
+		return render_ascii;
 	case 'A':
-		renderer = render_ansi;
-		break;
+		return render_ansi;
 	case 'g':
-		renderer = render_greyscale;
-		break;
+		return render_greyscale;
+	case 's':
+		return render_sixel;
 	case '2':
-		renderer = render_256;
-		break;
+		return render_256;
 	default:
-		renderer = render_rgb;
-		break;
+		return render_rgb;
 	}
 }
 
 R_API void r_cons_image(const ut8 *buf, int bufsz, int width, int mode) {
-	int height = (bufsz / width) / 3;
-	selectrenderer (mode);
-	dorender (r_cons_printf, buf, bufsz, width, height);
+	const int height = (bufsz / width) / 3;
+	Renderer renderer = select_renderer (mode);
+	do_render (renderer, r_cons_printf, buf, bufsz, width, height);
 }
 
 #if 0
@@ -164,9 +190,12 @@ main(int argc, const char **argv) {
 	}
 	w = atoi (argv[1]);
 	h = atoi (argv[2]);
+	Renderer renderer;
 	if (argc>3) {
-		selectrenderer (argv[3]);
-	} else renderer = render_rgb;
+		renderer = select_renderer (argv[3]);
+	} else {
+		renderer = render_rgb
+	};
 	if (w<1 || h<1) {
 		printf ("Invalid arguments\n");
 		return 1;
@@ -180,7 +209,7 @@ main(int argc, const char **argv) {
 		readsz += n;
 	} while (readsz < imgsz);
 
-	dorender (buf, readsz, w, h);
+	do_render (render, buf, readsz, w, h);
 
 	free (buf);
 	return 0;

@@ -9,9 +9,6 @@ fd       3
 file     bins/msx/testmsx.rom
 size     0x2000
 humansz  8K
-minopsz  1
-maxopsz  3
-invopsz  1
 mode     r-x
 format   msx
 iorw     false
@@ -22,6 +19,7 @@ baddr    0x0
 binsz    8192
 bits     8
 canary   false
+injprot  false
 retguard false
 class    AB
 crypto   false

@@ -18,27 +18,32 @@ if not capstone_dep.found() or not get_option('use_sys_capstone')
 
     patches_files = []
     # NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/Makefile
-    if capstone_version == 'v5'
-      CS_TIP = 'ba2199042700e6bda2e0069e924370a7b2530ac0'
+    if capstone_version == 'next'
+      CS_TIP = 'a4df92eda647e739432860682be638da1b8b901a'
       CS_BRA = 'next'
       patches_files = [
         'fix-x86-16.patch',
-        'mmm.patch'
       ]
-    elif capstone_version == 'v3'
-      CS_TIP = '61bf71c771680033651f16cff832446e421847b1'
-      CS_BRA = 'v3'
+    elif capstone_version == 'v5'
+      CS_TIP = '097c04d9413c59a58b00d4d1c8d5dc0ac158ffaa'
+      CS_BRA = 'v5'
       patches_files = [
-        'capstone-include.patch'
+        'fix-x86-16.patch'
       ]
     elif capstone_version == 'v4'
-      CS_TIP = 'a7cac8352f7397aa73bb2e2dcc1b6cdb2e1b8461'
+      CS_TIP = '0efa3cc530ea188c0e03c945ab884ee19dd16342'
       CS_BRA = 'v4'
       patches_files = [
         'capstone-calloc.patch',
         'fix-x86-16.patch',
         'sparc-crash.patch',
         'sstream-null.patch'
+      ]
+    elif capstone_version == 'v3'
+      CS_TIP = '61bf71c771680033651f16cff832446e421847b1'
+      CS_BRA = 'v3'
+      patches_files = [
+        'capstone-include.patch'
       ]
     else
       error('Wrong capstone version selected. Please use one of the supported versions.')
@@ -107,6 +112,7 @@ if not capstone_dep.found() or not get_option('use_sys_capstone')
     'arch/XCore/XCoreInstPrinter.c',
     'arch/XCore/XCoreMapping.c',
     'arch/XCore/XCoreModule.c',
+    'Mapping.c',
     'cs.c',
     'MCInst.c',
     'MCInstrDesc.c',

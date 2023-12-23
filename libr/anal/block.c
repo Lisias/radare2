@@ -1,10 +1,22 @@
-/* radare - LGPL - Copyright 2019-2021 - pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2019-2023 - pancake, thestr4ng3r */
 
 #include <r_anal.h>
 #include <r_hash.h>
-#include <ht_uu.h>
 
 #define unwrap(rbnode) container_of (rbnode, RAnalBlock, _rb)
+
+// rename to instr_at
+R_API ut64 r_anal_block_ninstr(RAnalBlock *block, int pos) {
+	r_return_val_if_fail (block, UT64_MAX);
+	if (pos < 1) {
+		return block->addr;
+	}
+	if (pos > block->ninstr) {
+		return UT64_MAX;
+	}
+	// ensure pos is > 0 because first check is pos < 1
+	return block->addr + block->op_pos[pos - 1];
+}
 
 static void __max_end(RBNode *node) {
 	RAnalBlock *block = unwrap (node);
@@ -23,11 +35,14 @@ static void __max_end(RBNode *node) {
 static int __bb_addr_cmp(const void *incoming, const RBNode *in_tree, void *user) {
 	ut64 incoming_addr = *(ut64 *)incoming;
 	const RAnalBlock *in_tree_block = container_of (in_tree, const RAnalBlock, _rb);
-	if (incoming_addr < in_tree_block->addr) {
-		return -1;
-	}
-	if (incoming_addr > in_tree_block->addr) {
-		return 1;
+	if (in_tree_block) {
+		ut64 itaddr = in_tree_block->addr;
+		if (incoming_addr < itaddr) {
+			return -1;
+		}
+		if (incoming_addr > itaddr) {
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -35,9 +50,12 @@ static int __bb_addr_cmp(const void *incoming, const RBNode *in_tree, void *user
 #define D if (anal && anal->verbose)
 
 R_API void r_anal_block_ref(RAnalBlock *bb) {
-	// 0-refd must already be freed.
-	r_return_if_fail (bb->ref > 0);
-	bb->ref++;
+	// XXX we have R_REF for this
+	if (bb) {
+		// 0-refd must already be freed.
+		r_return_if_fail (bb->ref > 0);
+		bb->ref++;
+	}
 }
 
 #define DFLT_NINSTR 3
@@ -69,6 +87,7 @@ static void block_free(RAnalBlock *block) {
 	if (!block) {
 		return;
 	}
+	free (block->esil);
 	r_anal_cond_free (block->cond);
 	free (block->fingerprint);
 	r_anal_diff_free (block->diff);
@@ -88,12 +107,16 @@ void __block_free_rb(RBNode *node, void *user) {
 
 R_API void r_anal_block_reset(RAnal *a) {
 	if (a->bb_tree) {
-		 r_rbtree_free (a->bb_tree, __block_free_rb, NULL);
+		r_rbtree_free (a->bb_tree, __block_free_rb, NULL);
 		a->bb_tree = NULL;
 	}
 }
 
 R_API RAnalBlock *r_anal_get_block_at(RAnal *anal, ut64 addr) {
+	r_return_val_if_fail (anal, NULL);
+	if (addr == UT64_MAX || !anal->bb_tree) {
+		return NULL;
+	}
 	RBNode *node = r_rbtree_find (anal->bb_tree, &addr, __bb_addr_cmp, NULL);
 	return node? unwrap (node): NULL;
 }
@@ -170,10 +193,9 @@ R_API void r_anal_blocks_foreach_intersect(RAnal *anal, ut64 addr, ut64 size, RA
 
 R_API RList *r_anal_get_blocks_intersect(RAnal *anal, ut64 addr, ut64 size) {
 	RList *list = r_list_newf ((RListFree)r_anal_block_unref);
-	if (!list) {
-		return NULL;
+	if (R_LIKELY (list)) {
+		r_anal_blocks_foreach_intersect (anal, addr, size, block_list_cb, list);
 	}
-	r_anal_blocks_foreach_intersect (anal, addr, size, block_list_cb, list);
 	return list;
 }
 
@@ -183,11 +205,9 @@ R_API RAnalBlock *r_anal_create_block(RAnal *anal, ut64 addr, ut64 size) {
 	}
 	R_CRITICAL_ENTER (anal);
 	RAnalBlock *block = block_new (anal, addr, size);
-	if (!block) {
-		R_CRITICAL_LEAVE (anal);
-		return NULL;
+	if (block) {
+		r_rbtree_aug_insert (&anal->bb_tree, &block->addr, &block->_rb, __bb_addr_cmp, NULL, __max_end);
 	}
-	r_rbtree_aug_insert (&anal->bb_tree, &block->addr, &block->_rb, __bb_addr_cmp, NULL, __max_end);
 	R_CRITICAL_LEAVE (anal);
 	return block;
 }
@@ -327,7 +347,9 @@ R_API RAnalBlock *r_anal_block_split(RAnalBlock *bbi, ut64 addr) {
 			if (off_op >= bbi->size + bb->size) {
 				break;
 			}
-			r_anal_bb_set_offset (bb, bb->ninstr, off_op - bbi->size);
+			if (!r_anal_bb_set_offset (bb, bb->ninstr, off_op - bbi->size)) {
+				break;
+			}
 			bb->ninstr++;
 			i++;
 		}
@@ -362,7 +384,10 @@ R_API bool r_anal_block_merge(RAnalBlock *a, RAnalBlock *b) {
 	// merge ops from b into a
 	size_t i;
 	for (i = 0; i < b->ninstr; i++) {
-		r_anal_bb_set_offset (a, a->ninstr++, a->size + r_anal_bb_offset_inst (b, i));
+		ut64 addr = a->size + r_anal_bb_offset_inst (b, i);
+		if (!r_anal_bb_set_offset (a, a->ninstr++, addr)) {
+			break;
+		}
 	}
 
 	// merge everything else into a
@@ -609,12 +634,21 @@ R_API bool r_anal_block_op_starts_at(RAnalBlock *bb, ut64 addr) {
 		return false;
 	}
 	ut64 off = addr - bb->addr;
+	if (off == 0) {
+		return true;
+	}
 	if (off > UT16_MAX) {
 		return false;
+	}
+	if (bb->ninstr < 1) {
+		return true;
 	}
 	size_t i;
 	for (i = 0; i < bb->ninstr; i++) {
 		ut16 inst_off = r_anal_bb_offset_inst (bb, i);
+		if (inst_off > off) {
+			break;
+		}
 		if (off == inst_off) {
 			return true;
 		}
@@ -716,6 +750,9 @@ beach:
 
 R_API bool r_anal_block_was_modified(RAnalBlock *block) {
 	r_return_val_if_fail (block, false);
+	if (!block->bbhash) {
+		return false;
+	}
 	if (!block->anal->iob.read_at) {
 		return false;
 	}
@@ -763,6 +800,9 @@ static void noreturn_successor_free(HtUPKv *kv) {
 }
 
 static bool noreturn_successors_cb(RAnalBlock *block, void *user) {
+	if (!block) {
+		return false;
+	}
 	HtUP *succs = user;
 	NoreturnSuccessor *succ = R_NEW0 (NoreturnSuccessor);
 	if (!succ) {
@@ -829,7 +869,7 @@ R_API RAnalBlock *r_anal_block_chop_noreturn(RAnalBlock *block, ut64 addr) {
 	RListIter *it;
 	RAnalFunction *fcn;
 	// We need to clone the list because block->fcns will get modified in the loop
-	RList *fcns_cpy = r_list_clone (block->fcns);
+	RList *fcns_cpy = r_list_clone (block->fcns, NULL);
 	r_list_foreach (fcns_cpy, it, fcn) {
 		RAnalBlock *entry = r_anal_get_block_at (block->anal, fcn->addr);
 		if (entry && r_list_contains (entry->fcns, fcn)) {
@@ -880,12 +920,18 @@ typedef struct {
 } AutomergeCtx;
 
 static bool count_successors_cb(ut64 addr, void *user) {
+	if (addr == UT64_MAX) {
+		return true;
+	}
 	AutomergeCtx *ctx = user;
 	ctx->cur_succ_count++;
 	return true;
 }
 
 static bool automerge_predecessor_successor_cb(ut64 addr, void *user) {
+	if (addr == UT64_MAX) {
+		return true;
+	}
 	AutomergeCtx *ctx = user;
 	ctx->cur_succ_count++;
 	RAnalBlock *block = ht_up_find (ctx->blocks, addr, NULL);
@@ -908,6 +954,9 @@ static bool automerge_predecessor_successor_cb(ut64 addr, void *user) {
 }
 
 static bool automerge_get_predecessors_cb(void *user, ut64 k) {
+	if (k == UT64_MAX) {
+		return true;
+	}
 	AutomergeCtx *ctx = user;
 	const RAnalFunction *fcn = (const RAnalFunction *)(size_t)k;
 	RListIter *it;

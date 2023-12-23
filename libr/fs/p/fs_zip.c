@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2022 - pancake */
+/* radare - LGPL - Copyright 2022-2023 - pancake */
 
 #include <r_fs.h>
 #include <r_lib.h>
@@ -135,6 +135,7 @@ static RList *fs_zip_dir(RFSRoot *root, const char *path, R_UNUSED int view) {
 	zip_t *za = zip_open_from_source (zs, _flags, &error);
 	if (!za) {
 		R_LOG_ERROR ("failed to open zip from source");
+		zip_source_free (zs);
 		free (buf);
 		return NULL;
 	}
@@ -176,7 +177,7 @@ static RList *fs_zip_dir(RFSRoot *root, const char *path, R_UNUSED int view) {
 			char *p = strchr (n, '/');
 			if (!p || (*p && !p[1])) {
 				char type = (sb.size == 0 && is_dir)? 'd': 'f';
-				char *nn = (type=='d')? r_str_ndup (n, strlen (n) - 1): strdup (n);
+				char *nn = (type == 'd')? r_str_ndup (n, strlen (n) - 1): strdup (n);
 				append_file (list, nn, type, 0, sb.size);
 				free (nn);
 			}
@@ -194,10 +195,12 @@ static RList *fs_zip_dir(RFSRoot *root, const char *path, R_UNUSED int view) {
 }
 
 RFSPlugin r_fs_plugin_zip = {
-	.name = "zip",
-	.author = "pancake",
-	.desc = "access compressed zip contents",
-	.license = "MIT",
+	.meta = {
+		.name = "zip",
+		.author = "pancake",
+		.desc = "access compressed zip contents",
+		.license = "MIT",
+	},
 	.open = fs_zip_open,
 	.read = fs_zip_read,
 	.close = fs_zip_close,

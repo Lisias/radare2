@@ -1,21 +1,8 @@
-/* radare - LGPL - Copyright 2017-2022 - pancake, maskray, thestr4ng3r */
+/* radare - LGPL - Copyright 2017-2023 - pancake, maskray, thestr4ng3r */
 
 #include "r_vector.h"
 
-// Optimize memory usage on glibc
-#if __WORDSIZE == 32
-// Chunk size 24, minus 4 (chunk header), minus 8 for capacity and len, 12 bytes remaining for 3 void *
-#define INITIAL_VECTOR_LEN 3
-#else
-// For __WORDSIZE == 64
-// Chunk size 48, minus 8 (chunk header), minus 8 for capacity and len, 32 bytes remaining for 4 void *
 #define INITIAL_VECTOR_LEN 4
-#endif
-
-#define NEXT_VECTOR_CAPACITY (vec->capacity < INITIAL_VECTOR_LEN \
-	? INITIAL_VECTOR_LEN \
-	: vec->capacity <= 12 ? vec->capacity * 2 \
-	: vec->capacity + (vec->capacity >> 1))
 
 #define RESIZE_OR_RETURN_NULL(next_capacity) do { \
 		size_t new_capacity = next_capacity; \
@@ -29,6 +16,7 @@
 			return NULL; \
 		} \
 		vec->a = new_a; \
+		/* SLOW but at least ensure its initialized */ \
 		if (new_capacity > vec->capacity) { \
 			memset (((ut8 *)vec->a) + (vec->elem_size * vec->capacity), 0, (new_capacity - vec->capacity) * vec->elem_size); \
 		} \
@@ -115,6 +103,11 @@ R_API RVector *r_vector_clone(RVector *vec) {
 	return ret;
 }
 
+R_API bool r_vector_copy(RVector *d, RVector *s) {
+	r_return_val_if_fail (d && s, false);
+	return vector_clone (d, s);
+}
+
 R_API void r_vector_assign(RVector *vec, void *p, void *elem) {
 	r_return_if_fail (vec && p && elem);
 	memcpy (p, elem, vec->elem_size);
@@ -158,6 +151,9 @@ R_API void *r_vector_insert(RVector *vec, size_t index, void *x) {
 
 R_API void *r_vector_insert_range(RVector *vec, size_t index, void *first, size_t count) {
 	r_return_val_if_fail (vec && index <= vec->len, NULL);
+	if (count < 1) {
+		return NULL;
+	}
 	if (vec->len + count > vec->capacity) {
 		RESIZE_OR_RETURN_NULL (R_MAX (NEXT_VECTOR_CAPACITY, vec->len + count));
 	}
@@ -188,7 +184,7 @@ R_API void r_vector_pop_front(RVector *vec, void *into) {
 
 R_API void *r_vector_push(RVector *vec, void *x) {
 	r_return_val_if_fail (vec, NULL);
-	if (vec->len >= vec->capacity) {
+	if (R_UNLIKELY (vec->len >= vec->capacity)) {
 		RESIZE_OR_RETURN_NULL (NEXT_VECTOR_CAPACITY);
 	}
 	void *p = r_vector_index_ptr (vec, vec->len++);
@@ -205,7 +201,7 @@ R_API void *r_vector_push_front(RVector *vec, void *x) {
 
 R_API void *r_vector_reserve(RVector *vec, size_t capacity) {
 	r_return_val_if_fail (vec, NULL);
-	if (vec->capacity < capacity) {
+	if (vec->len == 0 || vec->capacity <= capacity) {
 		RESIZE_OR_RETURN_NULL (capacity);
 	}
 	return vec->a;
@@ -242,10 +238,9 @@ R_API void r_pvector_init(RPVector *vec, RPVectorFree free) {
 
 R_API RPVector *r_pvector_new(RPVectorFree free) {
 	RPVector *v = R_NEW (RPVector);
-	if (!v) {
-		return NULL;
+	if (R_LIKELY (v)) {
+		r_pvector_init (v, free);
 	}
-	r_pvector_init (v, free);
 	return v;
 }
 
@@ -275,11 +270,10 @@ R_API void r_pvector_fini(RPVector *vec) {
 }
 
 R_API void r_pvector_free(RPVector *vec) {
-	if (!vec) {
-		return;
+	if (R_LIKELY (vec)) {
+		r_vector_fini (&vec->v);
+		free (vec);
 	}
-	r_vector_fini (&vec->v);
-	free (vec);
 }
 
 R_API void **r_pvector_contains(RPVector *vec, void *x) {
@@ -302,17 +296,15 @@ R_API void *r_pvector_remove_at(RPVector *vec, size_t index) {
 
 R_API void r_pvector_remove_data(RPVector *vec, void *x) {
 	void **el = r_pvector_contains (vec, x);
-	if (!el) {
-		return;
+	if (R_LIKELY (el)) {
+		size_t index = el - (void **)vec->v.a;
+		r_vector_remove_at (&vec->v, index, NULL);
 	}
-
-	size_t index = el - (void **)vec->v.a;
-	r_vector_remove_at (&vec->v, index, NULL);
 }
 
 R_API void *r_pvector_pop(RPVector *vec) {
 	r_return_val_if_fail (vec, NULL);
-	if (r_pvector_len (vec) < 1) {
+	if (r_pvector_length (vec) < 1) {
 		return NULL;
 	}
 	void *r = r_pvector_at (vec, vec->v.len - 1);
@@ -322,7 +314,7 @@ R_API void *r_pvector_pop(RPVector *vec) {
 
 R_API void *r_pvector_pop_front(RPVector *vec) {
 	r_return_val_if_fail (vec, NULL);
-	if (r_pvector_len (vec) < 1) {
+	if (r_pvector_length (vec) < 1) {
 		return NULL;
 	}
 	void *r = r_pvector_at (vec, 0);

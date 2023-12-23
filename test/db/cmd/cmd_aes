@@ -49,15 +49,8 @@ aepc $$
 aep test @ 5
 aep
 aes
-aes
 EOF
-EXPECT=<<EOF
-"aep ret0=dr R0=0;aexa ret"
-aep test @ 0x5
-"aep memcpy=wf `dr?A1` `dr?A2` @ `dr?A0`;aexa ret"
-"aep strlen=dr R0=`pszl@r:A0`;aexa ret"
-"aep puts=psz@r:A0; aexa ret"
-test
+EXPECT_ERR=<<EOF
 EOF
 RUN
 
@@ -82,7 +75,19 @@ aep test @ 0x5
 "aep strlen=dr R0=`pszl@r:A0`;aexa ret"
 "aep puts=psz@r:A0; aexa ret"
 test
+Usage: te[...]  Type enum commands
+| te                 list all loaded enums
+| te <enum>          print all values of enum for given name
+| te <enum> <value>  show name for given enum number
+| te-<enum>          delete enum type definition
+| tej                list all loaded enums in json
+| tej <enum>         show enum in json
+| teb <enum> <name>  show matching enum bitfield for given name
+| tec                list all loaded enums in C output format with newlines
+| tec <name>         list given loaded enums in C output format with newlines
+| ted                list all loaded enums in C output format without newlines
 EOF
+EXPECT_ERR=
 RUN
 
 NAME=emulate imports
@@ -102,5 +107,27 @@ EXPECT=<<EOF
 "aep puts=psz@r:A0; aexa ret"
 aep puts @ 0x1050
 Hello World
+EOF
+RUN
+
+NAME=esil plugins
+FILE=malloc://128
+CMDS=<<EOF
+aeim
+aeL
+?e --
+aeL dummy
+?e --
+ae dummy_op
+EOF
+EXPECT=<<EOF
+dummy
+null
+--
+--
+EOF
+EXPECT_ERR=<<EOF
+INFO: esil.dummy: Activated
+INFO: Dummy: Operation executed
 EOF
 RUN

@@ -1,7 +1,7 @@
 /* radare - LGPL - Copyright 2007-2022 - pancake */
 
 #include <r_util.h>
-#if __UNIX__
+#if R2__UNIX__
 #include <sys/mman.h>
 #endif
 
@@ -18,7 +18,7 @@ R_API int r_mem_count(const ut8 **addr) {
 }
 
 // R2580 return bool
-R_API int r_mem_eq(ut8 *a, ut8 *b, int len) {
+R_API bool r_mem_eq(ut8 *a, ut8 *b, int len) {
 	register int i;
 	for (i = 0; i < len; i++) {
 		if (a[i] != b[i]) {
@@ -126,7 +126,7 @@ R_API ut64 r_mem_get_num(const ut8 *b, int size) {
 }
 
 // TODO: SEE: R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) { .. dupped code?
-R_API int r_mem_set_num(ut8 *dest, int dest_size, ut64 num) {
+R_API bool r_mem_set_num(ut8 *dest, int dest_size, ut64 num) {
 	// LITTLE ENDIAN is the default for streams
 	switch (dest_size) {
 	case 1:
@@ -262,7 +262,7 @@ R_API const ut8 *r_mem_mem_aligned(const ut8 *haystack, int hlen, const ut8 *nee
 R_API bool r_mem_protect(void *ptr, int size, const char *prot) {
 #if __wasi__
 	return false;
-#elif __UNIX__
+#elif R2__UNIX__
 	int p = 0;
 	if (strchr (prot, 'x')) {
 		p |= PROT_EXEC;
@@ -276,7 +276,7 @@ R_API bool r_mem_protect(void *ptr, int size, const char *prot) {
 	if (mprotect (ptr, size, p) == -1) {
 		return false;
 	}
-#elif __WINDOWS__
+#elif R2__WINDOWS__
 	int r, w, x;
 	DWORD p = PAGE_NOACCESS;
 	r = strchr (prot, 'r')? 1: 0;
@@ -302,14 +302,25 @@ R_API bool r_mem_protect(void *ptr, int size, const char *prot) {
 }
 
 R_API void *r_mem_dup(const void *s, int l) {
+	r_return_val_if_fail (s, NULL);
 	void *d = malloc (l);
-	if (d) {
+	if (d != NULL) {
 		memcpy (d, s, l);
 	}
 	return d;
 }
 
+R_API void *r_mem_set(ut8 ch, int l) {
+	void *d = malloc (l);
+	if (d) {
+		memset (d, ch, l);
+	}
+	return d;
+}
+
+
 R_API void r_mem_reverse(ut8 *b, int l) {
+	r_return_if_fail (b);
 	ut8 tmp;
 	int i, end = l / 2;
 	for (i = 0; i < end; i++) {
@@ -347,7 +358,7 @@ R_API void r_mem_free(void *p) {
 	free (p);
 }
 
-R_API void r_mem_memzero(void *dst, size_t l) {
+R_API void r_mem_zero(void *dst, size_t l) {
 #ifdef _MSC_VER
 	RtlSecureZeroMemory (dst, l);
 #elif __MINGW32__
@@ -363,7 +374,7 @@ R_API void r_mem_memzero(void *dst, size_t l) {
 }
 
 R_API void *r_mem_mmap_resize(RMmap *m, ut64 newsize) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	if (m->fm != INVALID_HANDLE_VALUE) {
 		CloseHandle (m->fm);
 	}
@@ -373,7 +384,7 @@ R_API void *r_mem_mmap_resize(RMmap *m, ut64 newsize) {
 	if (m->buf) {
 		UnmapViewOfFile (m->buf);
 	}
-#elif __UNIX__ && !__wasi__
+#elif R2__UNIX__ && !__wasi__
 	if (munmap (m->buf, m->len) != 0) {
 		return NULL;
 	}
@@ -384,4 +395,57 @@ R_API void *r_mem_mmap_resize(RMmap *m, ut64 newsize) {
 	m->len = newsize;
 	r_file_mmap_arch (m, m->filename, m->fd);
 	return m->buf;
+}
+
+R_API int r_mem_from_binstring(const char* str, ut8 *buf, size_t len) {
+	int i, j, k, ret;
+
+	int str_len = strlen (str);
+	ut8 *b = buf;
+	ut8 *e = buf + len;
+	for (i = 0; i < str_len && b < e; i += 8) {
+		ret = 0;
+		str = r_str_trim_head_ro (str);
+		if (i + 7 >= str_len) {
+			b[0] = 0; // null terminate if possible
+			// missing bytes
+			return -1;
+		}
+		for (k = 0, j = i + 7; j >= i; j--, k++) {
+			if (str[j] == ' ') {
+				continue;
+			}
+			if (str[j] == '1') {
+				ret |= (1 << k);
+			} else if (str[j] != '0') {
+				b[0] = 0; // null terminate if possible
+				return -1;
+			}
+		}
+		*b++ = ret;
+	}
+	b[0] = 0;
+	return b - buf;
+}
+
+R_API char *r_mem_to_binstring(const ut8* str, int len) {
+	if (len < 0) {
+		len = strlen ((const char *)str);
+	}
+	RStrBuf *buf = r_strbuf_new (NULL);
+	int i = 0;
+
+	for (i = 0; i < len; i++) {
+		ut8 ch = str[i];
+		r_strbuf_appendf (buf, "%c", ch & 128? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 64? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 32? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 16? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 8? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 4? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 2? '1': '0');
+		r_strbuf_appendf (buf, "%c", ch & 1? '1': '0');
+	}
+
+	return r_strbuf_drain (buf);
 }

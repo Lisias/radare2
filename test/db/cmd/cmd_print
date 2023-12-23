@@ -800,7 +800,7 @@ NAME=pm hello.c
 FILE=bins/src/hello.c
 CMDS=pm
 EXPECT=<<EOF
-0x00000000 1 C source code
+0x00000000 0 C source code
 EOF
 RUN
 
@@ -809,7 +809,7 @@ FILE=bins/elf/analysis/main
 ARGS=-n
 CMDS=pm
 EXPECT=<<EOF
-0x00000000 1 ELF 64-bit LSB executable, x86-64, version 1
+0x00000000 0 ELF 64-bit LSB executable, x86-64, version 1
 EOF
 RUN
 
@@ -818,7 +818,7 @@ FILE=bins/mach0/fatmach0-3true
 ARGS=-n
 CMDS=pm
 EXPECT=<<EOF
-0x00000000 1 Fat-Mach-O
+0x00000000 0 Fat-Mach-O
 EOF
 RUN
 
@@ -827,7 +827,7 @@ FILE=bins/java/Hello.class
 ARGS=-n
 CMDS=pm
 EXPECT=<<EOF
-0x00000000 1 Java CLASS
+0x00000000 0 Java CLASS
 EOF
 RUN
 
@@ -836,7 +836,7 @@ FILE=bins/pe/a.exe
 ARGS=-n
 CMDS=pm
 EXPECT=<<EOF
-0x00000000 1 PE for MS Windows (console) Intel 80386 32-bit
+0x00000000 0 PE for MS Windows (console) Intel 80386 32-bit
 EOF
 RUN
 
@@ -1170,7 +1170,7 @@ woe 0 0xff 1
 pxA 10
 EOF
 EXPECT=<<EOF
-++++++    _|  10
+++++++XXXX_|  10
 EOF
 RUN
 
@@ -1273,5 +1273,27 @@ EXPECT=<<EOF
 0x00400300 003 000a |##
 0x00400400 004 0013 |###
 0x00400500 005 0014 |####
+EOF
+RUN
+
+NAME=pso
+FILE=bins/mach0/swift-main3
+CMDS=<<EOF
+s 0x100003ed8
+pd 10
+pso
+EOF
+EXPECT=<<EOF
+            0x100003ed8      08a98cd2       mov x8, 0x6548             ; 'He'
+            0x100003edc      888dadf2       movk x8, 0x6c6c, lsl 16    ; 'll'
+            0x100003ee0      e80dc4f2       movk x8, 0x206f, lsl 32    ; 'o '
+            0x100003ee4      e8eaedf2       movk x8, 0x6f57, lsl 48    ; 'Wo'
+            0x100003ee8      498e8dd2       mov x9, 0x6c72             ; 'rl'
+            0x100003eec      890ca0f2       movk x9, 0x64, lsl 16      ; 'd'
+            0x100003ef0      0960fdf2       movk x9, 0xeb00, lsl 48
+            0x100003ef4      082402a9       stp x8, x9, [x0, 0x20]
+            0x100003ef8      01048052       mov w1, 0x20
+            0x100003efc      0220fcd2       mov x2, -0x1f00000000000000
+Hello World
 EOF
 RUN

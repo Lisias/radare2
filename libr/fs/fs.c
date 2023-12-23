@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2011-2022 - pancake */
+/* radare2 - LGPL - Copyright 2011-2023 - pancake */
 
 #define R_LOG_ORIGIN "fs"
 
@@ -65,7 +65,7 @@ R_API R_MUSTUSE RFS* r_fs_new(void) {
 				continue;
 			}
 			memcpy (static_plugin, fs_static_plugins[i], sizeof (RFSPlugin));
-			r_fs_add (fs, static_plugin);
+			r_fs_plugin_add (fs, static_plugin);
 			free (static_plugin);
 		}
 	}
@@ -77,7 +77,7 @@ R_API RFSPlugin* r_fs_plugin_get(RFS* fs, const char* name) {
 	RListIter* iter;
 	RFSPlugin* p;
 	r_list_foreach (fs->plugins, iter, p) {
-		if (!strcmp (p->name, name)) {
+		if (!strcmp (p->meta.name, name)) {
 			return p;
 		}
 	}
@@ -95,8 +95,8 @@ R_API void r_fs_free(RFS* fs) {
 }
 
 /* plugins */
-R_API void r_fs_add(RFS* fs, RFSPlugin* p) {
-	r_return_if_fail (fs && p);
+R_API bool r_fs_plugin_add(RFS* fs, RFSPlugin* p) {
+	r_return_val_if_fail (fs && p, false);
 	if (p->init) {
 		p->init ();
 	}
@@ -104,7 +104,14 @@ R_API void r_fs_add(RFS* fs, RFSPlugin* p) {
 	if (sp) {
 		memcpy (sp, p, sizeof (RFSPlugin));
 		r_list_append (fs->plugins, sp);
+		return true;
 	}
+	return false;
+}
+
+R_API bool r_fs_plugin_remove(RFS *fs, RFSPlugin *p) {
+	// XXX TODO
+	return true;
 }
 
 R_API void r_fs_del(RFS* fs, RFSPlugin* p) {

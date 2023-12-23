@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2008-2022 - nibble, pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2008-2023 - nibble, pancake, thestr4ng3r */
 
 #include <r_anal.h>
 #include <r_core.h>
@@ -10,7 +10,6 @@ static bool item_matches_filter(RAnalMetaItem *item, RAnalMetaType type, R_NULLA
 typedef struct {
 	RAnalMetaType type;
 	const RSpace *space;
-
 	RIntervalNode *node;
 } FindCtx;
 
@@ -111,12 +110,13 @@ static bool meta_set(RAnal *a, RAnalMetaType type, int subtype, ut64 from, ut64 
 	item->subtype = subtype;
 	item->space = space;
 	free (item->str);
-	item->str = str ? strdup (str) : NULL;
-	if (str && !item->str) {
-		if (!node) { // If we just created this
-			free (item);
-		}
-		return false;
+	if (R_STR_ISNOTEMPTY (str)) {
+		item->str = strdup (str);
+		// this breaks the `ecHw` command
+		// (highlights word in current instruction, which uses ansi
+		// r_str_ansi_strip (item->str);
+	} else {
+		item->str = NULL;
 	}
 	R_DIRTY (a);
 	if (!node) {
@@ -139,7 +139,6 @@ R_API const char *r_meta_get_string(RAnal *a, RAnalMetaType type, ut64 addr) {
 	RAnalMetaItem *item = node->data;
 	return item->str;
 }
-
 
 static void del(RAnal *a, RAnalMetaType type, const RSpace *space, ut64 addr, ut64 size) {
 	RPVector *victims = NULL;
@@ -219,11 +218,12 @@ R_API RPVector *r_meta_get_all_intersect(RAnal *a, ut64 start, ut64 size, RAnalM
 	return collect_nodes_intersect (a, type, r_spaces_current (&a->meta_spaces), start, end);
 }
 
-R_API const char *r_meta_type_to_string(int type) {
+R_API const char *r_meta_type_tostring(int type) {
 	// XXX: use type as '%c'
 	switch (type) {
-	case R_META_TYPE_DATA: return "Cd";
+	case R_META_TYPE_BIND: return "Cb";
 	case R_META_TYPE_CODE: return "Cc";
+	case R_META_TYPE_DATA: return "Cd";
 	case R_META_TYPE_STRING: return "Cs";
 	case R_META_TYPE_FORMAT: return "Cf";
 	case R_META_TYPE_MAGIC: return "Cm";
@@ -260,13 +260,15 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 			str = r_str_escape (d->str);
 		}
 	}
-	if (str || d->type == R_META_TYPE_DATA) {
+	if (str || d->type == R_META_TYPE_DATA || d->type == R_META_TYPE_BIND) {
 		if (d->type == R_META_TYPE_STRING && !*str) {
 			free (str);
 			return;
 		}
 		if (!str) {
 			pstr = "";
+		} else if (d->type == 'b') {
+			pstr = str;
 		} else if (d->type == 'f') {
 			pstr = str;
 		} else if (d->type == 's') {
@@ -288,7 +290,7 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 		case 'j':
 			pj_o (pj);
 			pj_kn (pj, "offset", start);
-			pj_ks (pj, "type", r_meta_type_to_string (d->type));
+			pj_ks (pj, "type", r_meta_type_tostring (d->type));
 
 			if (d->type == 'H') {
 				pj_k (pj, "color");
@@ -343,7 +345,7 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 			switch (d->type) {
 			case R_META_TYPE_COMMENT:
 				{
-				const char *type = r_meta_type_to_string (d->type);
+				const char *type = r_meta_type_tostring (d->type);
 				char *s = sdb_encode ((const ut8*)pstr, -1);
 				if (!s) {
 					s = strdup (pstr);
@@ -405,14 +407,14 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 			case R_META_TYPE_DATA:
 				if (rad) {
 					a->cb_printf ("%s %" PFMT64u " @ 0x%08" PFMT64x "\n",
-							r_meta_type_to_string (d->type),
+							r_meta_type_tostring (d->type),
 							size, start);
 				} else {
 					if (show_full) {
 						const char *dtype = d->type == 'h'? "hidden": "data";
 						a->cb_printf ("0x%08" PFMT64x " %s %s %"PFMT64u"\n",
 								start, dtype,
-								r_meta_type_to_string (d->type),
+								r_meta_type_tostring (d->type),
 								size);
 					} else {
 						a->cb_printf ("%" PFMT64u "\n", size);
@@ -423,7 +425,7 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 			case R_META_TYPE_FORMAT:
 				if (rad) {
 					a->cb_printf ("%s %" PFMT64u " %s @ 0x%08" PFMT64x "\n",
-							r_meta_type_to_string (d->type),
+							r_meta_type_tostring (d->type),
 							size, pstr, start);
 				} else {
 					if (show_full) {
@@ -435,10 +437,17 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 					}
 				}
 				break;
+			case R_META_TYPE_BIND:
+				if (rad) {
+					a->cb_printf ("Cb 0x%08" PFMT64x " %s\n", start, pstr);
+				} else {
+					a->cb_printf ("Cb 0x%08" PFMT64x " %s\n", start, pstr);
+				}
+				break;
 			case R_META_TYPE_VARTYPE:
 				if (rad) {
 					a->cb_printf ("%s %s @ 0x%08" PFMT64x "\n",
-							r_meta_type_to_string (d->type), pstr, start);
+							r_meta_type_tostring (d->type), pstr, start);
 				} else {
 					a->cb_printf ("0x%08" PFMT64x " %s\n", start, pstr);
 				}
@@ -449,20 +458,20 @@ R_API void r_meta_print(RAnal *a, RAnalMetaItem *d, ut64 start, ut64 size, int r
 					const char *esc = strchr (d->str, '\x1b');
 					r_cons_rgb_parse (esc, &r, &g, &b, &A);
 					a->cb_printf ("%s rgb:%02x%02x%02x @ 0x%08" PFMT64x "\n",
-						r_meta_type_to_string (d->type), r, g, b, start);
+						r_meta_type_tostring (d->type), r, g, b, start);
 					// TODO: d->size
 				}
 				break;
 			default:
 				if (rad) {
 					a->cb_printf ("%s %" PFMT64u " 0x%08" PFMT64x " # %s\n",
-						r_meta_type_to_string (d->type),
+						r_meta_type_tostring (d->type),
 						size, start, pstr);
 				} else {
 					// TODO: use b64 here
 					a->cb_printf ("0x%08" PFMT64x " array[%" PFMT64u "] %s %s\n",
 						start, size,
-						r_meta_type_to_string (d->type), pstr);
+						r_meta_type_tostring (d->type), pstr);
 				}
 				break;
 			}
@@ -525,7 +534,7 @@ static void print_meta_list(RAnal *a, int type, int rad, ut64 addr, const char *
 			continue;
 		}
 		if (t) {
-			const char *type = r_meta_type_to_string (item->type);
+			const char *type = r_meta_type_tostring (item->type);
 			const char *name = item->str;
 			r_table_add_rowf (t, "xxss",
 				node->start,
@@ -538,7 +547,11 @@ static void print_meta_list(RAnal *a, int type, int rad, ut64 addr, const char *
 
 beach:
 	if (t && tq) {
-		r_table_query (t, tq);
+		if (!r_table_query (t, tq)) {
+			pj_free (pj);
+			r_table_free (t);
+			return;
+		}
 	}
 	if (!tq || !strstr (tq, "?")) {
 		if (t) {
@@ -548,8 +561,6 @@ beach:
 		} else if (pj) {
 			pj_end (pj);
 			r_cons_printf ("%s\n", pj_string (pj));
-			pj_free (pj);
-			pj = NULL;
 		}
 	}
 	pj_free (pj);

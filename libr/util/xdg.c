@@ -14,7 +14,7 @@ static char *xdg(const char *env, const char *a, const char *s) {
 	char *dir = r_sys_getenv (env);
 	if (R_STR_ISEMPTY (dir)) {
 		free (dir);
-		dir = r_str_home (a);
+		dir = r_file_home (a);
 	}
 	char *res = r_file_new (dir, "radare2", s, NULL);
 	free (dir);
@@ -28,7 +28,7 @@ R_API char *r_xdg_configdir(const char *s) {
 
 // XDG_DATA_HOME	User-specific data	~/.var/app/<app-id>/data
 R_API char *r_xdg_datadir(const char *s) {
-	return xdg ("XDG_DATA_HOME", ".local/share", s);
+	return xdg ("XDG_DATA_HOME", ".local" R_SYS_DIR "share", s);
 }
 
 // XDG_CACHE_HOME	Non-essential user-specific data	~/.var/app/<app-id>/cache

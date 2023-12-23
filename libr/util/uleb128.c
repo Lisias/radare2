@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2014-2021 - pancake */
+/* radare - LGPL - Copyright 2014-2023 - pancake */
 
 #include "r_util/r_str.h"
 #include <r_util.h>
@@ -10,6 +10,9 @@ R_API const ut8 *r_uleb128(const ut8 *data, int datalen, ut64 *v, const char **e
 	ut64 s, sum = 0;
 	const ut8 *data_end;
 	bool malformed_uleb = true;
+	if (!data) {
+		return NULL;
+	}
 	if (v) {
 		*v = 0LL;
 	}

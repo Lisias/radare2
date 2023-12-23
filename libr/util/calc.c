@@ -145,6 +145,11 @@ static RNumCalcValue prim(RNum *num, RNumCalc *nc, int get) {
 		//double& v = table[nc->string_value];
 		r_str_trim (nc->string_value);
 		v = Nset (r_num_get (num, nc->string_value));
+#if 0
+		if (num && num->nc.errors > 0) {
+			return v;
+		}
+#endif
 		get_token (num, nc);
 		if (nc->curr_tok  == RNCASSIGN) {
 			v = expr (num, nc, 1);
@@ -196,7 +201,7 @@ static RNumCalcValue prim(RNum *num, RNumCalc *nc, int get) {
 	return v;
 }
 
-static void cin_putback(RNum *num, RNumCalc *nc, char c) {
+static inline void cin_putback(RNum *num, RNumCalc *nc, char c) {
 	nc->oc = c;
 }
 
@@ -217,13 +222,17 @@ static int cin_get(RNum *num, RNumCalc *nc, char *c) {
 		*c = nc->oc;
 		nc->oc = 0;
 	} else {
-		if (!nc->calc_buf || !*nc->calc_buf) {
+		if (R_STR_ISEMPTY (nc->calc_buf)) {
+			nc->calc_i = 0;
+			nc->calc_buf = NULL;
 			return 0;
 		}
 		*c = nc->calc_buf[nc->calc_i];
 		if (*c) {
 			nc->calc_i++;
 		} else {
+			nc->calc_i = 0;
+			nc->calc_buf = NULL;
 			return 0;
 		}
 	}
@@ -246,7 +255,16 @@ static int cin_get_num(RNum *num, RNumCalc *nc, RNumCalcValue *n) {
 		}
 	}
 	str[i] = 0;
+#if 1
 	*n = Nset (r_num_get (num, str));
+#else
+	ut64 v = r_num_get (num, str);
+	if (num && num->nc.errors > 0) {
+		return 0;
+	}
+	*n = Nset (v);
+#endif
+
 	if (IS_DIGIT (*str) && strchr (str, '.')) {
 		if (sscanf (str, "%lf", &d) < 1) {
 			return 0;
@@ -334,17 +352,13 @@ static RNumCalcToken get_token(RNum *num, RNumCalc *nc) {
 		return nc->curr_tok = RNCNUMBER;
 
 #define isvalidchar(x) \
-	(isalnum(x) || (x)==':' || (x)=='$' || (x)=='.' || (x)=='_' || (x)=='?' || (x)=='\\' \
-	|| (x)==' ' || (x)=='[' || (x)==']' || (x)=='}' || (x)=='{' || ((x)>='0' && (x)<='9'))
+	(isalnum (x)  || (x) == ':' || (x) == '$' || (x) == '.' || (x) == '_' || (x) == '?' || (x) == '\\' \
+	|| (x) == ' ' || (x) == '[' || (x) == ']' || (x) == '}' || (x) == '{' || ((x) >= '0' && (x) <= '9'))
 
 	default:
 		{
 			int i = 0;
-#define stringValueAppend(x) { \
-	const size_t max = sizeof (nc->string_value) - 1; \
-	if (i < max) { nc->string_value[i++] = x; } \
-	else { nc->string_value[max] = 0; } \
-}
+#define stringValueAppend(x) { const size_t max = sizeof (nc->string_value) - 1; if (i < max) { nc->string_value[i++] = x; } else { nc->string_value[max] = 0; } }
 			stringValueAppend (ch);
 			if (ch == '[') {
 				while (cin_get (num, nc, &ch) && ch != ']') {

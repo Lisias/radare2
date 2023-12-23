@@ -55,7 +55,7 @@ R_API void r_core_wait(RCore *core) {
 }
 
 static void http_logf(RCore *core, const char *fmt, ...) {
-	bool http_log_enabled = r_config_get_i (core->config, "http.log");
+	bool http_log_enabled = r_config_get_b (core->config, "http.log");
 	va_list ap;
 	va_start (ap, fmt);
 	if (http_log_enabled) {
@@ -96,7 +96,7 @@ static char *rtrcmd(TextLog T, const char *str) {
 static void showcursor(RCore *core, int x) {
 	if (core && core->vmode) {
 		r_cons_show_cursor (x);
-		r_cons_enable_mouse (x? r_config_get_i (core->config, "scr.wheel"): false);
+		r_cons_enable_mouse (x? r_config_get_b (core->config, "scr.wheel"): false);
 	} else {
 		r_cons_enable_mouse (false);
 	}
@@ -179,7 +179,7 @@ R_API int r_core_rtr_http_stop(RCore *u) {
 	const char *port;
 	RSocket* sock;
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 	r_socket_http_server_set_breaked (&r_cons_context ()->breaked);
 #endif
 	if (((size_t)u) > 0xff) {
@@ -213,7 +213,7 @@ static char *rtr_dir_files(const char *path) {
 	return r_str_append (ptr, "</body></html>\n");
 }
 
-#if __UNIX__
+#if R2__UNIX__ && !__wasi__
 static void dietime(int sig) {
 	eprintf ("It's Time To Die!\n");
 	exit (0);
@@ -223,7 +223,7 @@ static void dietime(int sig) {
 static void activateDieTime(RCore *core) {
 	int dt = r_config_get_i (core->config, "http.dietime");
 	if (dt > 0) {
-#if __UNIX__ && !__wasi__
+#if R2__UNIX__ && !__wasi__
 		r_sys_signal (SIGALRM, dietime);
 		alarm (dt);
 #else
@@ -232,8 +232,8 @@ static void activateDieTime(RCore *core) {
 	}
 }
 
-#include "rtr_http.c"
-#include "rtr_shell.c"
+#include "rtr_http.inc.c"
+#include "rtr_shell.inc.c"
 
 static int write_reg_val(char *buf, ut64 sz, ut64 reg, int regsize, bool bigendian) {
 	if (!bigendian) {
@@ -389,26 +389,29 @@ static int r_core_rtr_gdb_cb(libgdbr_t *g, void *core_ptr, const char *cmd,
 			case 't':
 				switch (cmd[3]) {
 				case '\0': // dpt
-					if (!core->dbg->h->threads) {
-						return -1;
-					}
-					if (!(list = core->dbg->h->threads(core->dbg, core->dbg->pid))) {
-						return -1;
-					}
-					memset (out_buf, 0, max_len);
-					out_buf[0] = 'm';
-					ret = 1;
-					r_list_foreach (list, iter, dbgpid) {
-						// Max length of a hex pid = 8?
-						if (ret >= max_len - 9) {
-							break;
+					{
+						RDebugPlugin *plugin = R_UNWRAP3 (core->dbg, current, plugin);
+						if (!plugin || !plugin->threads) {
+							return -1;
 						}
-						snprintf (out_buf + ret, max_len - ret - 1, "%x,", dbgpid->pid);
-						ret = strlen (out_buf);
-					}
-					if (ret > 1) {
-						ret--;
-						out_buf[ret] = '\0';
+						if (!(list = plugin->threads (core->dbg, core->dbg->pid))) {
+							return -1;
+						}
+						memset (out_buf, 0, max_len);
+						out_buf[0] = 'm';
+						ret = 1;
+						r_list_foreach (list, iter, dbgpid) {
+							// Max length of a hex pid = 8?
+							if (ret >= max_len - 9) {
+								break;
+							}
+							snprintf (out_buf + ret, max_len - ret - 1, "%x,", dbgpid->pid);
+							ret = strlen (out_buf);
+						}
+						if (ret > 1) {
+							ret--;
+							out_buf[ret] = '\0';
+						}
 					}
 					return 0;
 				case 'r': // dptr -> return current tid as int
@@ -420,7 +423,7 @@ static int r_core_rtr_gdb_cb(libgdbr_t *g, void *core_ptr, const char *cmd,
 			break;
 		case 'r': // dr
 			r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, false);
-			be = r_config_get_i (core->config, "cfg.bigendian");
+			be = r_config_get_b (core->config, "cfg.bigendian");
 			if (isspace ((ut8)cmd[2])) { // dr reg
 				const char *name, *val_ptr;
 				char new_cmd[128] = {0};
@@ -544,17 +547,12 @@ static int r_core_rtr_gdb_cb(libgdbr_t *g, void *core_ptr, const char *cmd,
 static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
 	RSocket *sock;
 	int p, ret;
-	bool debug_msg = false;
 	char port[10];
 	char *file = NULL, *args = NULL;
 	libgdbr_t *g;
 
 	if (!core || !path) {
 		return -1;
-	}
-	if (*path == '!') {
-		debug_msg = true;
-		path++;
 	}
 	if (!(path = r_str_trim_head_ro (path)) || !*path) {
 		R_LOG_ERROR ("gdbserver: Port not specified");
@@ -604,7 +602,6 @@ static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
 		return -1;
 	}
 	gdbr_init (g, true);
-	g->server_debug = debug_msg;
 	int arch = r_sys_arch_id (r_config_get (core->config, "asm.arch"));
 	int bits = r_config_get_i (core->config, "asm.bits");
 	gdbr_set_architecture (g, arch, bits);
@@ -904,7 +901,7 @@ R_API void r_core_rtr_event(RCore *core, const char *input) {
 	}
 	if (!strcmp (input, "errmsg")) {
 		// TODO: support udp, tcp, rap, ...
-#if __UNIX__ && !__wasi__
+#if R2__UNIX__ && !__wasi__
 		char *f = r_file_temp ("errmsg");
 		r_cons_printf ("%s\n", f);
 		r_file_rm (f);
@@ -1000,8 +997,10 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 				RT->input = strdup (input + 1);
 				//RapThread rt = { core, strdup (input + 1) };
 				rapthread = r_th_new (r_core_rtr_rap_thread, RT, false);
+#if 0
 				int cpuaff = (int)r_config_get_i (core->config, "cfg.cpuaffinity");
 				r_th_setaffinity (rapthread, cpuaff);
+#endif
 				r_th_setname (rapthread, "rapthread");
 				r_th_start (rapthread, false);
 				R_LOG_INFO ("Background rap server started");
@@ -1148,7 +1147,7 @@ static void rtr_cmds_client_close(uv_tcp_t *client, bool remove) {
 	rtr_cmds_context *context = loop->data;
 	if (remove) {
 		size_t i;
-		for (i = 0; i < r_pvector_len (&context->clients); i++) {
+		for (i = 0; i < r_pvector_length (&context->clients); i++) {
 			if (r_pvector_at (&context->clients, i) == client) {
 				r_pvector_remove_at (&context->clients, i);
 				break;
@@ -1206,7 +1205,7 @@ static void rtr_cmds_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *bu
 		client_context->res = strdup ("\n");
 	}
 
-	if (!client_context->res || (!r_config_get_i (client_context->core->config, "scr.prompt") &&
+	if (!client_context->res || (!r_config_get_b (client_context->core->config, "scr.prompt") &&
 				 !strcmp ((char *)buf, "q!")) ||
 				 !strcmp ((char *)buf, ".--")) {
 		rtr_cmds_client_close ((uv_tcp_t *) client, true);
@@ -1364,9 +1363,7 @@ R_API int r_core_rtr_cmds(RCore *core, const char *port) {
 					buf[i] = buf[i + 1]? ';': '\0';
 				}
 			}
-			if ((!r_config_get_i (core->config, "scr.prompt") &&
-			     !strcmp ((char *)buf, "q!")) ||
-			    !strcmp ((char *)buf, ".--")) {
+			if ((!r_config_get_b (core->config, "scr.prompt") && !strcmp ((char *)buf, "q!")) || !strcmp ((char *)buf, ".--")) {
 				r_socket_close (ch);
 				break;
 			}

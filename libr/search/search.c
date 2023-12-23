@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2008-2022 pancake */
+/* radare - LGPL - Copyright 2008-2023 pancake */
 
 #define R_LOG_ORIGIN "search"
 
@@ -93,6 +93,7 @@ R_API int r_search_set_mode(RSearch *s, int mode) {
 
 	// no r_search_update for these
 	case R_SEARCH_RABIN_KARP:
+	case R_SEARCH_TIRE:
 	case R_SEARCH_PATTERN:
 		break;
 	default:
@@ -118,8 +119,8 @@ R_API int r_search_begin(RSearch *s) {
 
 // use when the size of the hit does not match the size of the keyword (ie: /a{30}/)
 R_IPI int r_search_hit_sz(RSearch *s, RSearchKeyword *kw, ut64 addr, ut32 sz) {
-	if (s->align && (addr%s->align)) {
-		// eprintf ("0x%08"PFMT64x" unaligned\n", addr);
+	if (s->align && (addr % s->align)) {
+		R_LOG_DEBUG ("0x%08"PFMT64x" unaligned", addr);
 		return 1;
 	}
 	if (!s->contiguous) {
@@ -159,6 +160,7 @@ R_IPI int r_search_hit_sz(RSearch *s, RSearchKeyword *kw, ut64 addr, ut32 sz) {
 
 // Returns 2 if search.maxhits is reached, 0 on error, otherwise 1
 R_API int r_search_hit_new(RSearch *s, RSearchKeyword *kw, ut64 addr) {
+	r_return_val_if_fail (s && kw, 0);
 	return r_search_hit_sz (s, kw, addr, kw->keyword_length);
 }
 
@@ -533,6 +535,11 @@ R_API int r_search_update_read(RSearch *s, ut64 from, ut64 to) {
 		return search_regex_read (s, from, to);
 	case R_SEARCH_RABIN_KARP:
 		return search_rk (s, from, to);
+	case R_SEARCH_TIRE:
+		return search_tire (s, from, to);
+	case R_SEARCH_STRING:
+		R_LOG_TODO ("Not implemented");
+		return 0;
 	default:
 		R_LOG_WARN ("Unsupported search mode");
 		return -1;

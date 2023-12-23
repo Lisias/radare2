@@ -1,7 +1,6 @@
-/* radare - LGPL - Copyright 2017-2020 - polsha3 */
+/* radare - LGPL - Copyright 2017-2023 - polsha3 */
 
 #include <r_util.h>
-
 #include <signal.h>
 #include <stddef.h>
 
@@ -21,7 +20,7 @@ static struct {
 	{ "SIGPWR", SIGPWR },
 	{ "SIGPOLL", SIGPOLL },
 #endif
-#if !__WINDOWS__
+#if !R2__WINDOWS__
 	{ "SIGHUP", SIGHUP },
 	{ "SIGQUIT", SIGQUIT },
 	{ "SIGTRAP", SIGTRAP },
@@ -58,7 +57,7 @@ R_API int r_signal_from_string(const char *e) {
 	return atoi (e);
 }
 
-R_API const char* r_signal_to_string(int code) {
+R_API const char* r_signal_tostring(int code) {
 	int i;
 	for (i = 1; signals[i].name; i++) {
 		if (signals[i].code == code) {
@@ -68,7 +67,7 @@ R_API const char* r_signal_to_string(int code) {
 	return NULL;
 }
 
-#if __UNIX__
+#if R2__UNIX__
 R_API void r_signal_sigmask(int how, const sigset_t *newmask, sigset_t *oldmask) {
 #if HAVE_PTHREAD
 	pthread_sigmask (how, newmask, oldmask);
@@ -77,7 +76,7 @@ R_API void r_signal_sigmask(int how, const sigset_t *newmask, sigset_t *oldmask)
 #endif
 
 R_API const char *r_signal_to_human(int signum) {
-#if __UNIX__
+#if R2__UNIX__
 	switch (signum) {
 	case SIGALRM: return "Alarm Clock";
 	case SIGBUS: return "Bus Error";

@@ -7,6 +7,9 @@ r_util_sources = [
   'w32dw.c',
   'alloc.c',
   'rxml.c',
+  'rvc.c',
+  'rvc_git.c',
+  'rvc_rvc.c',
   'charset.c',
   'donut.c',
   'token.c',
@@ -16,13 +19,13 @@ r_util_sources = [
   'sstext.c',
   'getopt.c',
   'print_code.c',
+  'base36.c',
   'base85.c',
   'base91.c',
   'bdiff.c',
   'bitmap.c',
   'xdg.c',
   'buf.c',
-  'cache.c',
   'calc.c',
   'chmod.c',
   'debruijn.c',
@@ -88,7 +91,6 @@ r_util_sources = [
   'utf16.c',
   'utf32.c',
   'vector.c',
-  'skyline.c',
   'sys_w32.c',
   'zip.c',
   'protobuf.c',
@@ -101,8 +103,11 @@ if get_option('sdb_cgen')
   r_util_sources += r_util_d_sources
 endif
 
-r_util_deps = [ldl, mth, spp_dep, pth, utl, sdb_dep, lz4_dep, zlib_dep, platform_deps]
+if not get_option('use_sys_lz4')
+  library_cflags += ['-DUSE_SMALLZ4']
+endif
 
+r_util_deps = [ldl, mth, spp_dep, pth, utl, sdb_dep, lz4_dep, zlib_dep, platform_deps]
 
 if host_machine.system().startswith('freebsd') or host_machine.system().startswith('netbsd') or host_machine.system().startswith('haiku')
   # backtrace_symbols_fd requires -lexecinfo
@@ -115,6 +120,7 @@ if use_sys_openssl
 else
   r_util_sources += ['big.c']
 endif
+
 
 r_util = library('r_util', r_util_sources,
   include_directories: platform_inc,

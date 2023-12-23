@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2013-2021 - pancake */
+/* radare - LGPL - Copyright 2013-2022 - pancake */
 
 #include <r_cons.h>
 #include <r_util/r_assert.h>
@@ -156,6 +156,7 @@ R_API void r_cons_canvas_free(RConsCanvas *c) {
 		}
 		free (c->b);
 	}
+	free (c->bgcolor);
 	free (c->bsize);
 	free (c->blen);
 	ht_up_free (c->attrs);
@@ -226,6 +227,7 @@ R_API RConsCanvas *r_cons_canvas_new(int w, int h) {
 	if (!c) {
 		return NULL;
 	}
+	c->bgcolor = strdup (Color_RESET);
 	c->bsize = NULL;
 	c->blen = NULL;
 	int i = 0;
@@ -278,11 +280,13 @@ beach:
 	return NULL;
 }
 
-R_API void r_cons_canvas_write(RConsCanvas *c, const char *s) {
-	if (!c || !s || !*s || !R_BETWEEN (0, c->y, c->h - 1) || !R_BETWEEN (0, c->x, c->w - 1)) {
+R_API void r_cons_canvas_write(RConsCanvas *c, const char *_s) {
+	if (!c || !_s || !*_s || !R_BETWEEN (0, c->y, c->h - 1) || !R_BETWEEN (0, c->x, c->w - 1)) {
 		return;
 	}
-
+	char *oos = strdup (_s);
+	char *os = r_str_ansi_resetbg (oos, c->bgcolor);
+	const char *s = os;
 	char ch;
 	int left, slen, attr_len, piece_len;
 	int orig_x = c->x, attr_x = c->x;
@@ -324,10 +328,9 @@ R_API void r_cons_canvas_write(RConsCanvas *c, const char *s) {
 		if (attr_len > 0 && attr_x < c->blen[c->y]) {
 			__stampAttribute (c, c->y * c->w + attr_x, attr_len);
 		}
-
 		s = s_part;
 		if (ch == '\n') {
-			c->attr = Color_RESET;
+			c->attr = c->bgcolor;
 			__stampAttribute (c, c->y * c->w + attr_x, 0);
 			c->y++;
 			s++;
@@ -344,9 +347,18 @@ R_API void r_cons_canvas_write(RConsCanvas *c, const char *s) {
 	} while (*s && !r_cons_is_breaked ());
 	r_cons_break_pop ();
 	c->x = orig_x;
+	free (oos);
+	free (os);
 }
 
-R_API char *r_cons_canvas_to_string(RConsCanvas *c) {
+R_API void r_cons_canvas_background(RConsCanvas *c, const char *color) {
+	if (color) {
+		free (c->bgcolor);
+		c->bgcolor = strdup (color);
+	}
+}
+
+R_API char *r_cons_canvas_tostring(RConsCanvas *c) {
 	r_return_val_if_fail (c, NULL);
 
 	int x, y, olen = 0, attr_x = 0;
@@ -406,20 +418,20 @@ R_API char *r_cons_canvas_to_string(RConsCanvas *c) {
 }
 
 R_API void r_cons_canvas_print_region(RConsCanvas *c) {
-	char *o = r_cons_canvas_to_string (c);
+	char *o = r_cons_canvas_tostring (c);
 	if (o) {
 		r_str_trim_tail (o);
 		if (*o) {
-			r_cons_strcat (o);
+			r_cons_print (o);
 		}
 		free (o);
 	}
 }
 
 R_API void r_cons_canvas_print(RConsCanvas *c) {
-	char *o = r_cons_canvas_to_string (c);
+	char *o = r_cons_canvas_tostring (c);
 	if (o) {
-		r_cons_strcat (o);
+		r_cons_print (o);
 		free (o);
 	}
 }
@@ -601,6 +613,27 @@ R_API void r_cons_canvas_fill(RConsCanvas *c, int x, int y, int w, int h, char c
 		}
 	}
 	free (row);
+}
+
+R_API void r_cons_canvas_bgfill(RConsCanvas *c, int x, int y, int w, int h, const char *color) {
+	int i;
+	const char *pad = r_str_pad (' ', w + 2);
+	char *bgcolor = strdup (color);
+	char *col = strstr (bgcolor, "\x1b[3");
+	if (col) {
+		col[2] = '4';
+	} else {
+		free (bgcolor);
+		bgcolor = strdup (Color_BGBLUE);
+	}
+	char *row = r_str_newf ("%s%s"Color_RESET, bgcolor, pad);
+	for (i = 0; i < h; i++) {
+		if (G (x, y + i)) {
+			W (row);
+		}
+	}
+	free (row);
+	free (bgcolor);
 }
 
 R_API void r_cons_canvas_line(RConsCanvas *c, int x, int y, int x2, int y2, RCanvasLineStyle *style) {

@@ -188,16 +188,12 @@ beach:
 
 static void __riocache_free(void *user) {
 	RIOCache *cache = (RIOCache *) user;
-	if (cache) {
-		free (cache->data);
-		free (cache->odata);
-	}
 	free (cache);
 }
 
 static bool __desc_cache_list_cb(void *user, const ut64 k, const void *v) {
 	RList *writes = (RList *)user;
-	RIOCache *cache = NULL;
+	RIOCacheItem *cache = NULL;
 	ut64 blockaddr;
 	int byteaddr, i;
 	if (!writes) {
@@ -208,7 +204,7 @@ static bool __desc_cache_list_cb(void *user, const ut64 k, const void *v) {
 	for (i = byteaddr = 0; byteaddr < R_IO_DESC_CACHE_SIZE; byteaddr++) {
 		if (dcache->cached & (0x1LL << byteaddr)) {
 			if (!cache) {
-				cache = R_NEW0 (RIOCache);
+				cache = R_NEW0 (RIOCacheItem);
 				if (!cache) {
 					return false;
 				}
@@ -258,7 +254,7 @@ R_API RList *r_io_desc_cache_list(RIODesc *desc) {
 	desc->io->desc = desc;
 	desc->io->p_cache = false;
 
-	RIOCache *c;
+	RIOCacheItem *c;
 	RListIter *iter;
 	r_list_foreach (writes, iter, c) {
 		const ut64 itvSize = r_itv_size (c->itv);

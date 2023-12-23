@@ -1,6 +1,6 @@
 /* sdb - MIT - Copyright 2020-2022 - pancake, thestr4ng3r */
 
-#include "sdb.h"
+#include "sdb/sdb.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -351,7 +351,7 @@ static bool load_process_final_line(LoadCtx *ctx) {
 	// load_process_line needs ctx.buf[ctx.pos] to be allocated!
 	// so we need room for one additional byte after the buffer.
 	size_t linesz = ctx->bufsz - ctx->line_begin;
-	char *linebuf = (char *)malloc (linesz + 1);
+	char *linebuf = (char *)sdb_gh_malloc (linesz + 1);
 	if (!linebuf) {
 		return false;
 	}
@@ -433,12 +433,12 @@ SDB_API bool sdb_text_load(Sdb *s, const char *file) {
 		goto beach;
 	}
 #else
-	x = (char *)calloc (1, st.st_size);
+	x = (char *)sdb_gh_calloc (1, st.st_size);
 	if (!x) {
 		goto beach;
 	}
 	if (read (fd, x, st.st_size) != st.st_size) {
-		free (x);
+		sdb_gh_free (x);
 		goto beach;
 	}
 #endif
@@ -446,7 +446,7 @@ SDB_API bool sdb_text_load(Sdb *s, const char *file) {
 #if USE_MMAN
 	munmap (x, st.st_size);
 #else
-	free (x);
+	sdb_gh_free (x);
 #endif
 beach:
 	close (fd);
@@ -478,9 +478,6 @@ SDB_API bool sdb_text_check(Sdb *s, const char *file) {
 		if (*p == '=') {
 			has_eq = true;
 		} else if (*p == '\n') {
-			if (!has_eq) {
-				break;
-			}
 			has_nl = true;
 		} else if (!has_eq) {
 			if (*p < 10 || *p > '~') {

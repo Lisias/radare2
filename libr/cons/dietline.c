@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2022 - pancake */
+/* radare - LGPL - Copyright 2007-2023 - pancake */
 /* dietline is a lightweight and portable library similar to GNU readline */
 
 #include <r_cons.h>
@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 #include <windows.h>
 #define printf(...) r_cons_win_printf (false, __VA_ARGS__)
 #define USE_UTF8 1
@@ -231,7 +231,7 @@ R_API int r_line_dietline_init(void) {
 #if USE_UTF8
 /* read utf8 char into 's', return the length in bytes */
 static int r_line_readchar_utf8(ut8 *s, int slen) {
-#if __WINDOWS__
+#if R2__WINDOWS__
 	return r_line_readchar_win (s, slen);
 #else
 	// TODO: add support for w32
@@ -239,9 +239,14 @@ static int r_line_readchar_utf8(ut8 *s, int slen) {
 	if (slen < 1) {
 		return 0;
 	}
-	int ch = r_cons_readchar ();
+	int ch = -1;
+	if (I.demo) {
+		ch = r_cons_readchar_timeout (80);
+	} else {
+		ch = r_cons_readchar ();
+	}
 	if (ch == -1) {
-		return -1;
+		return I.demo? 0: -1;
 	}
 	*s = ch;
 	*s = r_cons_controlz (*s);
@@ -273,7 +278,7 @@ static int r_line_readchar_utf8(ut8 *s, int slen) {
 }
 #endif
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 static int r_line_readchar_win(ut8 *s, int slen) { // this function handle the input in console mode
 	INPUT_RECORD irInBuf = { {0} };
 	BOOL ret;
@@ -728,7 +733,7 @@ static void selection_widget_select(void) {
 }
 
 static void selection_widget_update(void) {
-	int argc = r_pvector_len (&I.completion.args);
+	int argc = r_pvector_length (&I.completion.args);
 	const char **argv = (const char **)r_pvector_data (&I.completion.args);
 	if (argc == 0 || (argc == 1 && I.buffer.length >= strlen (argv[0]))) {
 		selection_widget_erase ();
@@ -766,7 +771,7 @@ R_API void r_line_autocomplete(void) {
 	if (I.completion.run) {
 		I.completion.opt = false;
 		I.completion.run (&I.completion, &I.buffer, I.prompt_type, I.completion.run_user);
-		argc = r_pvector_len (&I.completion.args);
+		argc = r_pvector_length (&I.completion.args);
 		argv = (const char **)r_pvector_data (&I.completion.args);
 		opt = I.completion.opt;
 	}
@@ -865,7 +870,7 @@ R_API void r_line_autocomplete(void) {
 	if (argc > 1 && I.echo) {
 		const int sep = 3;
 		int slen, col = 10;
-#ifdef __WINDOWS__
+#ifdef R2__WINDOWS__
 		r_cons_win_printf (false, "%s%s\n", I.prompt, I.buffer.data);
 #else
 		printf ("%s%s\n", I.prompt, I.buffer.data);
@@ -951,9 +956,13 @@ static inline void delete_till_end(void) {
 }
 
 static const char *promptcolor (void) {
-	return r_cons_singleton ()->context->pal.bgprompt;
+	if (I.demo) {
+		return r_cons_singleton ()->context->pal.prompt;
+	}
+	return Color_RESET;
 }
 
+static R_TH_LOCAL int count = 0;
 static void __print_prompt(void) {
 	RCons *cons = r_cons_singleton ();
 	int columns = r_cons_get_size (NULL) - 2;
@@ -969,10 +978,37 @@ static void __print_prompt(void) {
 	} else {
 		printf ("\r%s", I.prompt);
 	}
+#if 1
 	if (I.buffer.length > 0) {
-		fwrite (I.buffer.data, I.buffer.length, 1, stdout);
+		int maxlen = R_MIN (I.buffer.length, cols);
+		fwrite (I.buffer.data, maxlen, 1, stdout);
+		if (I.buffer.length > cols) {
+			fwrite (" >", 2, 1, stdout);
+		}
 	}
-	printf ("\r%s%s%s", promptcolor (), I.prompt, promptcolor ());
+#endif
+	if (I.demo) {
+		// 15% cpu usage, but yeah its fancy demoscene. may be good to optimize
+		int pos = (count > 0)? count % strlen (I.prompt) : 0;
+		char *a = strdup (I.prompt);
+		char *kb = (char *)r_str_ansi_chrn (a, pos);
+		char *kc = (char *)r_str_ansi_chrn (kb, 3);
+		char *b = r_str_ndup (kb, kc - kb);
+		char *c = strdup (kc);
+		char *rb = r_str_newf (Color_WHITE"%s%s", b, promptcolor ());
+		*kb = 0;
+		printf ("\r%s%s%s%s%s", promptcolor (), a, rb, c, Color_RESET);
+		free (a);
+		free (b);
+		free (rb);
+		free (c);
+		count += 1;
+		if (count > strlen (I.prompt)) {
+			count = 0;
+		}
+	} else {
+		printf ("\r%s%s%s", promptcolor (), I.prompt, promptcolor ());
+	}
 	if (I.buffer.index > cols) {
 		printf ("< ");
 		i = I.buffer.index - cols;
@@ -1223,7 +1259,8 @@ static void __vi_mode(void) {
 					I.buffer.length -= I.buffer.index;
 					I.buffer.index = 0;
 					break;
-				} __print_prompt ();
+				}
+				__print_prompt ();
 			} // end of while (rep--)
 			break;
 		} // end of case 'd'
@@ -1413,6 +1450,14 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 		if (r_cons_is_breaked ()) {
 			break;
 		}
+#if 0
+		// detect truncation
+		if (I.buffer.length > I.length) {
+			I.buffer.data[0] = 0;
+			I.buffer.length = 0;
+			return NULL;
+		}
+#endif
 		I.buffer.data[I.buffer.length] = '\0';
 		if (cb) {
 			int cbret = cb (user, I.buffer.data);
@@ -1423,13 +1468,19 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 		}
 #if USE_UTF8
 		utflen = r_line_readchar_utf8 ((ut8 *) buf, sizeof (buf));
-		if (utflen < 1) {
+		if (utflen < (I.demo?0:1)) {
 			r_cons_break_pop ();
 			return NULL;
 		}
 		buf[utflen] = 0;
+		if (I.demo && utflen == 0) {
+			// refresh
+			__print_prompt ();
+			count++;
+			continue;
+		}
 #else
-#if __WINDOWS__
+#if R2__WINDOWS__
 		{
 			int len = r_line_readchar_win ((ut8 *)buf, sizeof (buf));
 			if (len < 1) {
@@ -1554,7 +1605,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 			I.buffer.length = 0;
 			I.buffer.index = 0;
 			break;
-#if __WINDOWS__
+#if R2__WINDOWS__
 		case 22:// ^V - Paste from windows clipboard
 		{
 			HANDLE hClipBoard;
@@ -1647,7 +1698,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 			}
 			break;
 		case 27: // esc-5b-41-00-00 alt/meta key
-#if __WINDOWS__
+#if R2__WINDOWS__
 			// always skip escape
 			memmove (buf, buf + 1, strlen ((char *)buf));
 #if 0
@@ -1720,7 +1771,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 				}
 				break;
 			default:
-#if !__WINDOWS__
+#if !R2__WINDOWS__
 				if (I.vtmode == 2) {
 					buf[1] = r_cons_readchar_timeout (50);
 					if (buf[1] == -1) { // alt+e
@@ -1860,7 +1911,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 							r_cons_readchar (); // should be '5'
 							ch = r_cons_readchar ();
 						}
-#if __WINDOWS__
+#if R2__WINDOWS__
 						else {
 							ch = buf[2];
 						}
@@ -1903,12 +1954,12 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 							}
 							break;
 						}
-						r_cons_set_raw (1);
+						r_cons_set_raw (true);
 						break;
-					case 0x37:	// HOME xrvt-unicode
+					case 0x37: // HOME xrvt-unicode
 						r_cons_readchar ();
 						break;
-					case 0x48:	// HOME
+					case 0x48: // HOME
 						if (I.sel_widget) {
 							selection_widget_up (I.sel_widget->options_len - 1);
 							selection_widget_draw ();
@@ -1916,10 +1967,10 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 						}
 						I.buffer.index = 0;
 						break;
-					case 0x34:	// END
-					case 0x38:	// END xrvt-unicode
+					case 0x34: // END
+					case 0x38: // END xrvt-unicode
 						r_cons_readchar ();
-					case 0x46:	// END
+					case 0x46: // END
 						if (I.sel_widget) {
 							selection_widget_down (I.sel_widget->options_len - 1);
 							selection_widget_draw ();
@@ -2071,8 +2122,16 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 	}
 _end:
 	r_cons_break_pop ();
-	r_cons_set_raw (0);
+	r_cons_set_raw (false);
 	r_cons_enable_mouse (mouse_status);
+#if 0
+	if (I.buffer.length > 1024) { // R2_590 - use I.maxlength
+		I.buffer.data[0] = 0;
+		I.buffer.length = 0;
+		R_LOG_WARN ("Input is too large");
+		return I.buffer.data;
+	}
+#endif
 	if (I.echo) {
 		printf ("\r%s%s%s%s\n", I.prompt, promptcolor (), I.buffer.data, Color_RESET);
 		fflush (stdout);

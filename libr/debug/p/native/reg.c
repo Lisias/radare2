@@ -2,12 +2,13 @@
 // split for better reading/cleaning up
 
 static char *r_debug_native_reg_profile(RDebug *dbg) {
-#if __WINDOWS__
-/*_______
- |   |   |
- |___|___|
- |   |   |
- |___|___|
+#if R2__WINDOWS__
+/*
+	  _______
+	 |   |   |
+	 |___|___|
+	 |   |   |
+	 |___|___|
 */
 	if (dbg->bits & R_SYS_BITS_64) {
 #include "reg/windows-x64.h"
@@ -15,7 +16,8 @@ static char *r_debug_native_reg_profile(RDebug *dbg) {
 #include "reg/windows-x86.h"
 	}
 #elif (__OpenBSD__ || __NetBSD__)
-/*                           __.--..__
+/*
+				     __.--..__
 	       \-/-/-/    _ __  _.--'  _.--'
 	  _  \'       \   \\  ''      `------.__
 	  \\/      __)_)   \\      ____..---'
@@ -27,6 +29,10 @@ static char *r_debug_native_reg_profile(RDebug *dbg) {
 #include "reg/netbsd-x86.h"
 #elif __x86_64__
 #include "reg/netbsd-x64.h"
+#elif __aarch64__
+#include "reg/netbsd-arm64.h"
+#elif __powerpc__
+#include "reg/kfbsd-ppc.h"
 #else
 #error "Unsupported BSD architecture"
 #endif

@@ -22,7 +22,7 @@ static int __io_posix_open(const char *file, int perm, int mode) {
 	if (r_file_is_directory (file)) {
 		return -1;
 	}
-#if __WINDOWS__
+#if R2__WINDOWS__
 	// probably unnecessary to have this ifdef nowadays windows is posix enough
 	if (perm & R_PERM_W) {
 		fd = r_sandbox_open (file, O_RDWR, 0);
@@ -142,7 +142,7 @@ RIOMMapFileObj *r_io_def_mmap_create_new_file(RIO  *io, const char *filename, in
 }
 
 static bool r_io_def_mmap_check_default(const char *filename) {
-	r_return_val_if_fail (filename && *filename, false);
+	r_return_val_if_fail (filename, false);
 	if (r_str_startswith (filename, "file://")) {
 		filename += strlen ("file://");
 	}
@@ -265,7 +265,7 @@ static bool __plugin_open_default(RIO *io, const char *file, bool many) {
 
 // default open should permit opening
 static RIODesc *__open_default(RIO *io, const char *file, int perm, int mode) {
-	if (r_io_def_mmap_check_default (file)) {
+	if (*file && r_io_def_mmap_check_default (file)) {
 		return r_io_def_mmap_open (io, file, perm, mode);
 	}
 	return NULL;
@@ -302,7 +302,7 @@ static bool __resize(RIO *io, RIODesc *fd, ut64 size) {
 	return r_io_def_mmap_truncate (mmo, size);
 }
 
-#if __UNIX__
+#if R2__UNIX__
 static bool __is_blockdevice(RIODesc *desc) {
 	r_return_val_if_fail (desc && desc->data, false);
 	RIOMMapFileObj *mmo = desc->data;
@@ -315,9 +315,11 @@ static bool __is_blockdevice(RIODesc *desc) {
 #endif
 
 RIOPlugin r_io_plugin_default = {
-	.name = "default",
-	.desc = "Open local files",
-	.license = "LGPL3",
+	.meta = {
+		.name = "default",
+		.desc = "Open local files",
+		.license = "LGPL3",
+	},
 	.uris = "file://,nocache://",
 	.open = __open_default,
 	.close = __close,
@@ -326,7 +328,7 @@ RIOPlugin r_io_plugin_default = {
 	.seek = __lseek,
 	.write = __write,
 	.resize = __resize,
-#if __UNIX__
+#if R2__UNIX__
 	.is_blockdevice = __is_blockdevice,
 #endif
 };

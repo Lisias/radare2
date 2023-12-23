@@ -1,12 +1,12 @@
 /* radare - LGPL - Copyright 2009-2019 - ret2libc, pancake */
 
 #define R_BIN_CGC 1
-#include "bin_elf.inc"
+#include "bin_elf.inc.c"
 
 extern struct r_bin_dbginfo_t r_bin_dbginfo_elf;
 extern struct r_bin_write_t r_bin_write_elf;
 
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	ut8 tmp[SCGCMAG + 1];
 	int r = r_buf_read_at (buf, 0, tmp, sizeof (tmp));
 	return r > SCGCMAG && !memcmp (tmp, CGCMAG, SCGCMAG) && tmp[4] != 2;
@@ -94,19 +94,20 @@ static RBuffer* create(RBin* bin, const ut8 *code, int codelen, const ut8 *data,
 }
 
 RBinPlugin r_bin_plugin_cgc = {
-	.name = "cgc",
-	.desc = "CGC format r_bin plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "cgc",
+		.desc = "CGC format r_bin plugin",
+		.license = "LGPL3",
+	},
 	.get_sdb = &get_sdb,
-	.load_buffer = load_buffer,
+	.load = load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.baddr = &baddr,
-	.boffset = &boffset,
 	.binsym = &binsym,
 	.entries = &entries,
 	.sections = &sections,
-	.symbols = &symbols,
+	.symbols_vec = &symbols_vec,
 	.minstrlen = 4,
 	.imports = &imports,
 	.info = &info,
@@ -118,7 +119,6 @@ RBinPlugin r_bin_plugin_cgc = {
 	.create = &create,
 	.patch_relocs = &patch_relocs,
 	.write = &r_bin_write_elf,
-	.file_type = get_file_type,
 	.regstate = regstate,
 	.maps = maps,
 };

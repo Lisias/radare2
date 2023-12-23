@@ -53,7 +53,7 @@
 
 #if WANT_THREADS
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 #undef HAVE_PTHREAD
 #define HAVE_PTHREAD 0
 #define R_TH_TID HANDLE
@@ -129,10 +129,15 @@ typedef enum r_th_lock_type_t {
 
 typedef struct r_th_lock_t {
 	R_ATOMIC_BOOL activating;
+#if 1
+	bool active;
+	RThreadLockType type;
+#else
 	struct {
 		bool active : 1;
 		RThreadLockType type : 7;
 	};
+#endif
 	R_TH_LOCK_T lock;
 } RThreadLock;
 

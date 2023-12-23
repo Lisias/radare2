@@ -2,6 +2,7 @@
 #define R_UTIL_TABLE_H
 
 #include <r_util.h>
+#include <r_vec.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,8 @@ typedef struct {
 	char *extra;
 } RListInfo;
 
+R_VEC_FORWARD_DECLARE(RVecListInfo);
+
 enum {
 	R_TABLE_ALIGN_LEFT,
 	R_TABLE_ALIGN_RIGHT,
@@ -41,23 +44,24 @@ typedef struct {
 	RList *items;
 } RTableRow;
 
+#define SHOW_HEADER 1
+#define SHOW_FANCY 2
+#define SHOW_SQL 4
+#define SHOW_JSON 8
+#define SHOW_CSV 16
+#define SHOW_TSV 32
+#define SHOW_HTML 64
+#define SHOW_R2 128
+#define SHOW_SUM 256
+
 typedef struct {
+	void *cons;
 	char *name;
 	RList *rows;
 	RList *cols;
 	int totalCols;
-	bool showHeader;
-	/// R2_580 - squash them all as int showMode and switch it
-	bool showFancy;
-	bool showSQL;
-	bool showJSON;
-	bool showCSV;
-	bool showTSV;
-	bool showHTML;
-	bool showR2;
-	bool showSum;
+	ut16 showMode;
 	bool adjustedCols;
-	void *cons;
 } RTable;
 
 typedef void (*RTableSelector)(RTableRow *acc, RTableRow *new_row, int nth);
@@ -94,8 +98,11 @@ R_API bool r_table_query(RTable *t, const char *q);
 R_API void r_table_hide_header(RTable *t);
 R_API bool r_table_align(RTable *t, int nth, int align);
 R_API void r_table_visual_list(RTable *table, RList* list, ut64 seek, ut64 len, int width, bool va);
+R_API void r_table_visual_vec(RTable *table, RVecListInfo* vec, ut64 seek, ut64 len, int width, bool va);
 R_API RTable *r_table_push(RTable *t);
 R_API RTable *r_table_pop(RTable *t);
+R_API RListInfo *r_listinfo_new(const char *name, RInterval pitv, RInterval vitv, int perm, const char *extra);
+R_API void r_listinfo_free(RListInfo *info);
 #if 0
 // not implemented
 R_API void r_table_fromjson(RTable *t, const char *csv);

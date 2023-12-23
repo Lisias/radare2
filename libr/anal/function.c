@@ -1,8 +1,6 @@
-/* radare - LGPL - Copyright 2019-2022 - pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2019-2023 - pancake, thestr4ng3r */
 
 #include <r_anal.h>
-
-#define D if (anal->verbose)
 
 static bool get_functions_block_cb(RAnalBlock *block, void *user) {
 	RList *list = user;
@@ -20,10 +18,9 @@ static bool get_functions_block_cb(RAnalBlock *block, void *user) {
 R_API RList *r_anal_get_functions_in(RAnal *anal, ut64 addr) {
 	r_return_val_if_fail (anal, NULL);
 	RList *list = r_list_new ();
-	if (!list) {
-		return NULL;
+	if (list) {
+		r_anal_blocks_foreach_in (anal, addr, get_functions_block_cb, list);
 	}
-	r_anal_blocks_foreach_in (anal, addr, get_functions_block_cb, list);
 	return list;
 }
 
@@ -41,7 +38,8 @@ static bool __fcn_exists(RAnal *anal, const char *name, ut64 addr) {
 	RAnalFunction *f = ht_pp_find (anal->ht_name_fun, name, &found);
 	if (f && found) {
 		if (f->addr != addr) {
-			R_LOG_ERROR ("Invalid function name '%s' at 0x%08"PFMT64x" (function at 0x%08"PFMT64x")", name, addr, f->addr);
+			const char *const nopskipmsg = (anal->opt.nopskip)? "Try disabling `e anal.nopskip=false`": "";
+			R_LOG_WARN ("Unaligned function '%s' at 0x%08"PFMT64x" (vs 0x%08"PFMT64x")%s", name, addr, f->addr, nopskipmsg);
 		}
 		return true;
 	}
@@ -359,4 +357,90 @@ R_API bool r_anal_function_was_modified(RAnalFunction *fcn) {
 		}
 	}
 	return false;
+}
+
+R_API int r_anal_function_coverage(RAnalFunction *fcn) {
+	int total = r_list_length (fcn->bbs);
+	RListIter *iter;
+	RAnalBlock *bb;
+	int traced = 0;
+	r_list_foreach (fcn->bbs, iter, bb) {
+		if (bb->traced != 0) {
+			traced++;
+		}
+	}
+	return (traced * 100) / total;
+}
+
+R_API RGraph *r_anal_function_get_graph(RAnalFunction *fcn, RGraphNode **node_ptr, ut64 addr) {
+	r_return_val_if_fail (fcn && fcn->bbs && r_list_length (fcn->bbs), NULL);
+	HtUP *nodes = ht_up_new0 ();
+	RGraph *g = r_graph_new ();
+	if (node_ptr) {
+		*node_ptr = NULL;
+	}
+	RListIter *iter;
+	RAnalBlock *bb;
+	r_list_foreach (fcn->bbs, iter, bb) {
+		RGraphNode *node = r_graph_add_node (g, bb);
+		if (node_ptr && !node_ptr[0] && bb->addr <= addr && addr < (bb->addr + bb->size)) {
+			*node_ptr = node;
+		}
+		ht_up_insert (nodes, bb->addr, node);
+	}
+	r_list_foreach (fcn->bbs, iter, bb) {
+		if (bb->jump == UT64_MAX  &&
+			(!bb->switch_op || !bb->switch_op->cases || !r_list_length (bb->switch_op->cases))) {
+			continue;
+		}
+		RGraphNode *node = (RGraphNode *)ht_up_find (nodes, bb->addr, NULL);
+		if (bb->jump != UT64_MAX) {
+			RGraphNode *_node = NULL;
+			_node = (RGraphNode *)ht_up_find (nodes, bb->jump, NULL);
+			if (!_node) {
+				R_LOG_ERROR ("Broken fcn");
+				ht_up_free (nodes);
+				r_graph_free (g);
+				if (node_ptr) {
+					*node_ptr = NULL;
+				}
+				return NULL;
+			}
+			r_graph_add_edge (g, node, _node);
+		}
+		if (bb->fail != UT64_MAX) {
+			RGraphNode *_node = NULL;
+			_node = (RGraphNode *)ht_up_find (nodes, bb->fail, NULL);
+			if (!_node) {
+				R_LOG_ERROR ("Broken fcn");
+				ht_up_free (nodes);
+				r_graph_free (g);
+				if (node_ptr) {
+					*node_ptr = NULL;
+				}
+				return NULL;
+			}
+			r_graph_add_edge (g, node, _node);
+		}
+		if (bb->switch_op && bb->switch_op->cases && r_list_length (bb->switch_op->cases)) {
+			RListIter *ator;
+			RAnalCaseOp *co;
+			r_list_foreach (bb->switch_op->cases, ator, co) {
+				RGraphNode *_node = NULL;
+				_node = (RGraphNode *)ht_up_find (nodes, co->addr, NULL);
+				if (!_node) {
+					R_LOG_ERROR ("Broken fcn");
+					ht_up_free (nodes);
+					r_graph_free (g);
+					if (node_ptr) {
+						*node_ptr = NULL;
+					}
+					return NULL;
+				}
+				r_graph_add_edge (g, node, _node);
+			}
+		}
+	}
+	ht_up_free (nodes);
+	return g;
 }

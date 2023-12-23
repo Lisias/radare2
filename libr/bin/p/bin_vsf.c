@@ -25,12 +25,12 @@ static const struct {
 static const int MACHINES_MAX = sizeof (_machines) / sizeof (_machines[0]);
 
 static Sdb* get_sdb(RBinFile *bf) {
-	r_return_val_if_fail (bf && bf->o && bf->o->bin_obj, NULL);
-	struct r_bin_vsf_obj* bin = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	r_return_val_if_fail (bf && bf->bo && bf->bo->bin_obj, NULL);
+	struct r_bin_vsf_obj* bin = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	return bin->kv;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *b) {
+static bool check(RBinFile *bf, RBuffer *b) {
 	ut8 magic[VICE_MAGIC_LEN];
 	if (r_buf_read_at (b, 0, magic, VICE_MAGIC_LEN) == VICE_MAGIC_LEN) {
 		return !memcmp (magic, VICE_MAGIC, VICE_MAGIC_LEN);
@@ -39,15 +39,15 @@ static bool check_buffer(RBinFile *bf, RBuffer *b) {
 }
 
 // XXX b vs bf->buf
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *b, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *b, ut64 loadaddr) {
 	ut64 offset = 0;
 	struct r_bin_vsf_obj* res = NULL;
-	if (check_buffer (bf, bf->buf)) {
+	if (check (bf, bf->buf)) {
 		int i = 0;
 		if (!(res = R_NEW0 (struct r_bin_vsf_obj))) {
 		    return false;
 		}
-		offset = r_offsetof(struct vsf_hdr, machine);
+		offset = r_offsetof (struct vsf_hdr, machine);
 		if (offset > bf->size) {
 			free (res);
 			return false;
@@ -63,13 +63,13 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *b, ut64 loadaddr,
 				free (res);
 				return false;
 			}
-			if (!strncmp (machine, _machines[i].name, strlen (_machines[i].name))) {
+			if (r_str_startswith (machine, _machines[i].name)) {
 				res->machine_idx = i;
 				break;
 			}
 		}
 		if (i >= MACHINES_MAX) {
-			eprintf ("Unsupported machine type\n");
+			R_LOG_WARN ("Unsupported machine type");
 			free (res);
 			return false;
 		}
@@ -100,22 +100,22 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *b, ut64 loadaddr,
 #undef CMP_MODULE
 			offset += module.length;
 			if (module.length == 0) {
-				eprintf ("Malformed VSF module with length 0\n");
+				R_LOG_ERROR ("Malformed VSF module with length 0");
 				break;
 			}
 		}
 	}
 	if (res) {
 		res->kv = sdb_new0 ();
-		sdb_ns_set (sdb, "info", res->kv);
+		sdb_ns_set (bf->sdb, "info", res->kv);
 	}
-	*bin_obj = res;
+	bf->bo->bin_obj = res;
 	return true;
 }
 
 static RList *mem(RBinFile *bf) {
 	// FIXME: What does Mem do? Should I remove it ?
-	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	if (!vsf_obj) {
 		return NULL;
 	}
@@ -138,7 +138,7 @@ static RList *mem(RBinFile *bf) {
 }
 
 static RList* sections(RBinFile* bf) {
-	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	if (!vsf_obj) {
 		return NULL;
 	}
@@ -295,7 +295,7 @@ static RList* sections(RBinFile* bf) {
 
 static RBinInfo* info(RBinFile *bf) {
 
-	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	if (!vsf_obj) {
 		return NULL;
 	}
@@ -472,7 +472,7 @@ static RList* symbols(RBinFile *bf) {
 		{0xDD0F, "CIA2_CRB" },
 	};
 	static const int SYMBOLS_MAX = sizeof (_symbols) / sizeof (_symbols[0]);
-	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	if (!vsf_obj) {
 		return NULL;
 	}
@@ -494,7 +494,8 @@ static RList* symbols(RBinFile *bf) {
 		if (!ptr->name) {
 			ptr->name = calloc(1, R_BIN_SIZEOF_STRINGS);
 		}
-		strncpy (ptr->name, _symbols[i].symbol_name, R_BIN_SIZEOF_STRINGS);
+		char *name = r_str_ndup (_symbols[i].symbol_name, R_BIN_SIZEOF_STRINGS);
+		ptr->name = r_bin_name_new_from (name);
 		ptr->vaddr = _symbols[i].address;
 		ptr->size = 2;
 		ptr->paddr = vsf_obj->mem + offset + _symbols[i].address;
@@ -506,13 +507,13 @@ static RList* symbols(RBinFile *bf) {
 }
 
 static void destroy(RBinFile *bf) {
-	struct r_bin_vsf_obj *obj = (struct r_bin_vsf_obj *)bf->o->bin_obj;
+	struct r_bin_vsf_obj *obj = (struct r_bin_vsf_obj *)bf->bo->bin_obj;
 	free (obj->maincpu);
 	free (obj);
 }
 
 static RList* entries(RBinFile *bf) {
-	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->o->bin_obj;
+	struct r_bin_vsf_obj* vsf_obj = (struct r_bin_vsf_obj*) bf->bo->bin_obj;
 	if (!vsf_obj) {
 		return NULL;
 	}
@@ -543,12 +544,14 @@ static RList* entries(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_vsf = {
-	.name = "vsf",
-	.desc = "VICE Snapshot File",
-	.license = "LGPL3",
+	.meta = {
+		.name = "vsf",
+		.desc = "VICE Snapshot File",
+		.license = "LGPL3",
+	},
 	.get_sdb = &get_sdb,
-	.load_buffer = &load_buffer,
-	.check_buffer = &check_buffer,
+	.load = &load,
+	.check = &check,
 	.entries = &entries,
 	.sections = sections,
 	.symbols = &symbols,

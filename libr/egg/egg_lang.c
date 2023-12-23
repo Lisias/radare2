@@ -266,8 +266,7 @@ static void rcc_mathop(REgg *egg, char **pos, int level) {
 		rcc_internal_mathop (egg, p, strdup (e->regs (egg, op_ret-1)), op);
 		rcc_internal_mathop (egg, (char *)e->regs (egg, op_ret-1),
 				strdup (e->regs (egg, level-1)), '=');
-	}
-	else rcc_internal_mathop(egg, p, strdup (e->regs (egg, level-1)), op);
+	} else { rcc_internal_mathop(egg, p, strdup (e->regs (egg, level-1)), op); }
 */
 }
 
@@ -490,7 +489,7 @@ R_API char *r_egg_mkvar(REgg *egg, char *out, const char *_str, int delta) {
 	}
 	/* XXX memory leak */
 	ret = str = oldstr = r_str_trim_dup (_str);
-	// if (num || str[0]=='0') { sprintf(out, "$%d", num); ret = out; }
+	// if (num || str[0] == '0') { sprintf(out, "$%d", num); ret = out; }
 	if ((q = strchr (str, ':'))) {
 		*q = '\0';
 		qi = atoi (q + 1);
@@ -779,7 +778,7 @@ static void rcc_context(REgg *egg, int delta) {
 			}
 			if (!strcmp (egg->lang.callname, "while")) {
 				char lab[128];
-				sprintf (lab, "__begin_%d_%d_%d", egg->lang.nfunctions,
+				snprintf (lab, sizeof (lab), "__begin_%d_%d_%d", egg->lang.nfunctions,
 					CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
 				// the egg->lang.nestedi[CTX-1] has increased
 				// so we should decrease it in label
@@ -800,7 +799,7 @@ static void rcc_context(REgg *egg, int delta) {
 				// CTX-1, egg->lang.nestedi[CTX-1]);
 				// nestede[CTX-1] = strdup (str);
 				// where give nestede value
-				sprintf (str, "__end_%d_%d_%d", egg->lang.nfunctions, CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
+				snprintf (str, sizeof (str), "__end_%d_%d_%d", egg->lang.nfunctions, CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
 				emit->branch (egg, b, g, e, n, egg->lang.varsize, str);
 				if (CTX > 0) {
 					/* XXX .. */
@@ -999,7 +998,7 @@ static void rcc_next(REgg *egg) {
 				R_LOG_ERROR ("Unsupported while syntax");
 				return;
 			}
-			sprintf (var, "__begin_%d_%d_%d\n", egg->lang.nfunctions, CTX, egg->lang.nestedi[CTX - 1]);
+			snprintf (var, sizeof (var), "__begin_%d_%d_%d\n", egg->lang.nfunctions, CTX, egg->lang.nestedi[CTX - 1]);
 			e->while_end (egg, var);// get_frame_label (1));
 #if 0
 			eprintf ("------------------------------------------ lastctx: %d\n", egg->lang.lastctxdelta);
@@ -1146,9 +1145,9 @@ static void rcc_next(REgg *egg) {
 				vs = egg->lang.varsize;
 				if (is_var (eq)) {
 					eq = r_egg_mkvar (egg, buf, eq, 0);
-					if (egg->lang.varxs=='*') {
+					if (egg->lang.varxs == '*') {
 						e->load (egg, eq, egg->lang.varsize);
-					} else if (egg->lang.varxs=='&') {
+					} else if (egg->lang.varxs == '&') {
 						// XXX this is a hack .. must be integrated with pusharg
 						e->load_ptr (egg, eq);
 					}
@@ -1181,7 +1180,7 @@ static void rcc_next(REgg *egg) {
 
 R_API int r_egg_lang_parsechar(REgg *egg, char c) {
 	REggEmit *e = egg->remit;
-	char *ptr, str[64], *tmp_ptr = NULL;
+	char str[64], *tmp_ptr = NULL;
 	int i, j;
 	if (c == '\n') {
 		egg->lang.line++;
@@ -1305,19 +1304,13 @@ R_API int r_egg_lang_parsechar(REgg *egg, char c) {
 				if (egg->lang.nested_callname[CTX - 1] && strstr (egg->lang.nested_callname[CTX - 1], "if")) {
 					tmp_ptr = r_str_newf ("__ifelse_%d_%d", CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
 					e->jmp (egg, tmp_ptr, 0);
-					R_FREE (tmp_ptr);	// mem leak
+					R_FREE (tmp_ptr);
 					egg->lang.ifelse_table[CTX - 1][egg->lang.nestedi[CTX - 1] - 1] =
 						r_str_newf ("__end_%d_%d_%d",
 							egg->lang.nfunctions, CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
 				}
-				// if (nestede[CTX]) {
-				// r_egg_printf (egg, "%s:\n", nestede[CTX]);
-				////nestede[CTX] = NULL;
-				// } else {
 				r_egg_printf (egg, "  __end_%d_%d_%d:\n",
 					egg->lang.nfunctions, CTX - 1, egg->lang.nestedi[CTX - 1] - 1);
-				// get_end_frame_label (egg));
-				// }
 			}
 			if (CTX > 0) {
 				egg->lang.nbrackets++;
@@ -1367,7 +1360,7 @@ R_API int r_egg_lang_parsechar(REgg *egg, char c) {
 		}
 		if (egg->lang.slurp) {
 			if (egg->lang.elem_n) {
-				ptr = egg->lang.elem;
+				char *ptr = egg->lang.elem;
 				egg->lang.elem[egg->lang.elem_n] = '\0';
 				while (is_space (*ptr)) {
 					ptr++;

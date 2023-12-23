@@ -11,11 +11,11 @@ FILE=bins/dmp/bmp.dmp
 CMDS=iI
 EXPECT=<<EOF
 arch     x86
-baddr    0xffffffffffffffff
 binsz    88428600
 bintype  dmp64
 bits     64
 canary   false
+injprot  false
 retguard false
 crypto   false
 endian   little

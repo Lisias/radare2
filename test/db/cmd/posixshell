@@ -10,6 +10,7 @@ pwd
 popd
 popd
 popd
+popd
 pwd
 EOF
 EXPECT=<<EOF
@@ -17,7 +18,7 @@ EXPECT=<<EOF
 /
 EOF
 EXPECT_ERR=<<EOF
-Cannot chdir
+ERROR: Cannot chdir
 /dev
 /dev
 /

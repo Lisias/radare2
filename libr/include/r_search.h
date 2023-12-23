@@ -26,6 +26,7 @@ enum {
 	R_SEARCH_DELTAKEY,
 	R_SEARCH_MAGIC,
 	R_SEARCH_RABIN_KARP,
+	R_SEARCH_TIRE,
 	R_SEARCH_LAST
 };
 
@@ -41,10 +42,12 @@ typedef struct r_search_keyword_t {
 	ut32 binmask_length;
 	void *data;
 	int count;
-	int kwidx;
-	int icase; // ignore case
+	int kwidx; // index
+	bool icase; // ignore case
 	int type;
 	ut64 last; // last hit hint
+	int align; // per-keyword alignment rule
+	// XXX string search dont have a way to report the kw hit size
 } RSearchKeyword;
 
 typedef struct r_search_uds_t {
@@ -56,6 +59,9 @@ typedef struct r_search_uds_t {
 typedef struct r_search_hit_t {
 	RSearchKeyword *kw;
 	ut64 addr;
+#if R2_590
+	size_t size;
+#endif
 } RSearchHit;
 
 typedef int (*RSearchCallback) (R_NULLABLE RSearchKeyword *kw, void *user, ut64 where); // TODO: depricate, b/c lacks match len
@@ -109,8 +115,9 @@ R_API int r_search_maps(RSearch *s, RList /*<<RIOMap>>*/ *maps);
 
 R_API void r_search_keyword_free(RSearchKeyword *kw);
 R_API RSearchKeyword* r_search_keyword_new(const ut8 *kw, int kwlen, const ut8 *bm, int bmlen, const char *data);
-R_API RSearchKeyword* r_search_keyword_new_str(const char *kw, const char *bm, const char *data, int icase);
-R_API RSearchKeyword* r_search_keyword_new_wide(const char *kw, const char *bm, const char *data, int icase);
+R_API RSearchKeyword* r_search_keyword_new_str(const char *kw, const char *bm, const char *data, bool icase);
+R_API RSearchKeyword* r_search_keyword_new_hexstr(const char *xs, const char *data);
+R_API RSearchKeyword* r_search_keyword_new_wide(const char *kw, const char *bm, const char *data, bool icase);
 R_API RSearchKeyword* r_search_keyword_new_hex(const char *kwstr, const char *bmstr, const char *data);
 R_API RSearchKeyword* r_search_keyword_new_hexmask(const char *kwstr, const char *data);
 R_API RSearchKeyword *r_search_keyword_new_regexp(const char *str, const char *data);

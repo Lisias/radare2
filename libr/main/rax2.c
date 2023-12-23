@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2022 - pancake */
+/* radare - LGPL - Copyright 2007-2023 - pancake */
 
 #define R_LOG_ORIGIN "rax2"
 
@@ -169,6 +169,7 @@ static int help(void) {
 		"  -r      r2 style output      ;  rax2 -r 0x1234\n"
 		"  -s      hexstr -> raw        ;  rax2 -s 43 4a 50\n"
 		"  -S      raw -> hexstr        ;  rax2 -S < /bin/ls > ls.hex\n"
+		"  -rS     raw -> hex.r2        ;  rax2 -rS < /bin/ls > ls.r2  # script for r2\n"
 		"  -t      tstamp -> str        ;  rax2 -t 1234567890\n"
 		"  -u      units                ;  rax2 -u 389289238 # 317.0M\n"
 		"  -v      version              ;  rax2 -v\n"
@@ -185,7 +186,8 @@ static bool rax(RNum *num, char *str, int len, int last, ut64 *_flags, int *fm) 
 	ut8 *buf;
 	char *p, out_mode = (flags & 128)? 'I': '0';
 	int i;
-	if (!(flags & 4) || !len) {
+	// For -S and -E we do not compute the length again since it may contain null byte.
+	if ((!(flags & 4) && !(flags & 4096)) || !len) {
 		len = strlen (str);
 	}
 	if ((flags & 4)) {
@@ -291,17 +293,31 @@ dotherax:
 		return true;
 	}
 	if (flags & (1 << 2)) { // -S
-		for (i = 0; i < len; i++) {
-			printf ("%02x", (ut8) str[i]);
+		if (flags & (1 << 18)) {
+			int j;
+			printf ("s+0\n");
+			for (i = 0; i < len;) {
+				printf ("wx+");
+				for (j = 0; j < 80 && i < len; j++, i++) {
+					printf ("%02x", (ut8) str[i]);
+				}
+				printf ("\n");
+			}
+			printf ("s-\n");
+			printf ("\n");
+		} else {
+			for (i = 0; i < len; i++) {
+				printf ("%02x", (ut8) str[i]);
+			}
+			printf ("\n");
 		}
-		printf ("\n");
 		return true;
 	} else if (flags & (1 << 3)) { // -b
-		int i;
-		ut8 buf[4096];
-		const int n = r_str_binstr2bin (str, buf, sizeof (buf));
-		for (i = 0; i < n; i++) {
-			printf ("%c", buf[i]);
+		ut8 out[256] = {0};
+		if (r_mem_from_binstring (str, out, sizeof (out) - 1)) {
+			printf ("%s\n", out); // TODO accept non null terminated strings
+		} else {
+			eprintf ("Invalid binary input string\n");
 		}
 		return true;
 	} else if (flags & (1 << 4)) { // -x
@@ -373,21 +389,9 @@ dotherax:
 		}
 		return true;
 	} else if (flags & (1 << 17)) { // -B (bin -> str)
-		int i = 0;
-		// TODO: move to r_util
-		for (i = 0; i < strlen (str); i++) {
-			ut8 ch = str[i];
-			printf ("%d%d%d%d"
-				"%d%d%d%d",
-				ch & 128? 1: 0,
-				ch & 64? 1: 0,
-				ch & 32? 1: 0,
-				ch & 16? 1: 0,
-				ch & 8? 1: 0,
-				ch & 4? 1: 0,
-				ch & 2? 1: 0,
-				ch & 1? 1: 0);
-		}
+		char *newstr = r_mem_to_binstring((const ut8*)str, strlen (str));
+		printf ("%s\n", newstr);
+		free (newstr);
 		return true;
 	} else if (flags & (1 << 16)) { // -w
 		ut64 n = r_num_calc (num, str, &errstr);
@@ -472,23 +476,26 @@ dotherax:
 		r_list_free (split);
 		return true;
 	} else if (flags & (1 << 12)) { // -E
-		const int n = strlen (str);
 		/* http://stackoverflow.com/questions/4715415/base64-what-is-the-worst-possible-increase-in-space-usage */
-		char *out = calloc (1, (n + 2) / 3 * 4 + 1); // ceil(n/3)*4 plus 1 for NUL
+		char *out = calloc (1, (len + 2) / 3 * 4 + 1); // ceil(n/3)*4 plus 1 for NUL
 		if (out) {
-			r_base64_encode (out, (const ut8 *) str, n);
+			r_base64_encode (out, (const ut8 *)str, len);
 			printf ("%s%s", out, nl);
 			fflush (stdout);
 			free (out);
 		}
 		return true;
 	} else if (flags & (1 << 13)) { // -D
-		const int n = strlen (str);
+		int n = strlen (str);
 		ut8 *out = calloc (1, n / 4 * 3 + 1);
 		if (out) {
-			r_base64_decode (out, str, n);
-			printf ("%s%s", out, nl);
-			fflush (stdout);
+			n = r_base64_decode (out, str, n);
+			if (n > 0) {
+				fwrite (out, n, 1, stdout);
+				fflush (stdout);
+			} else {
+				R_LOG_ERROR ("Cannot decode");
+			}
 			free (out);
 		}
 		return true;
@@ -550,15 +557,17 @@ dotherax:
 		eprintf ("%s %.01lf %ff %lf\n",
 			out, num->fvalue, f, d);
 #endif
+				if (n >> 32) {
+					printf ("int64   %"PFMT64d"\n", (st64)n);
+					printf ("uint64  %"PFMT64u"\n", (ut64)n);
+				} else {
+					printf ("int32   %d\n", (st32)n);
+					printf ("uint32  %u\n", (ut32)n);
+				}
 				printf ("hex     0x%"PFMT64x"\n", n);
 				printf ("octal   0%"PFMT64o"\n", n);
 				printf ("unit    %s\n", unit);
 				printf ("segment %04x:%04x\n", s, a);
-				if (n >> 32) {
-					printf ("int64   %"PFMT64d"\n", (st64)n);
-				} else {
-					printf ("int32   %d\n", (st32)n);
-				}
 				if (asnum) {
 					printf ("string  \"%s\"\n", asnum);
 					free (asnum);
@@ -567,14 +576,18 @@ dotherax:
 				r_str_bits64 (out, n);
 				memcpy (&f, &n, sizeof (f));
 				memcpy (&d, &n, sizeof (d));
+				printf ("float   %ff\n", f);
+				printf ("double  %lf\n", d);
 				printf ("binary  0b%s\n", out);
-				printf ("float:  %ff\n", f);
-				printf ("double: %lf\n", d);
 
 				/* ternary */
 				r_num_to_ternary (out, n);
 				printf ("ternary 0t%s\n", out);
 
+				// base36
+				char b36str[16];
+				b36_fromnum (b36str, n);
+				printf ("base36  %s\n", b36str);
 		return true;
 	} else if (flags & (1 << 19)) { // -L
 		r_print_hex_from_bin (NULL, str);
@@ -703,6 +716,8 @@ dotherax:
 R_API int r_main_rax2(int argc, const char **argv) {
 	int i, fm = 0;
 	int rc = 0;
+	int len = 0;
+
 	if (argc < 2) {
 		help_usage ();
 		// use_stdin (num, NULL, &fm);
@@ -712,8 +727,8 @@ R_API int r_main_rax2(int argc, const char **argv) {
 		for (i = 1; i < argc; i++) {
 			char *argv_i = strdup (argv[i]);
 			if (argv_i) {
-				r_str_unescape (argv_i);
-				if (!rax (num, argv_i, 0, i == argc - 1, &flags, &fm)) {
+				len = r_str_unescape (argv_i);
+				if (!rax (num, argv_i, len, i == argc - 1, &flags, &fm)) {
 					rc = 1;
 				}
 				free (argv_i);

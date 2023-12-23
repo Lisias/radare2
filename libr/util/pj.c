@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2018-2019 - pancake */
+/* radare - LGPL - Copyright 2018-2023 - pancake */
 
 #include <r_util.h>
 #include <r_util/r_print.h>
@@ -16,11 +16,9 @@ R_API void pj_kraw(PJ *j) {
 
 static void pj_comma(PJ *j) {
 	r_return_if_fail (j);
-	if (!j->is_key) {
-		if (!j->is_first) {
-			pj_raw (j, j->comma);
-			j->comma = ",";
-		}
+	if (!j->is_key && !j->is_first) {
+		pj_raw (j, j->comma);
+		j->comma = ",";
 	}
 	j->is_first = false;
 	j->is_key = false;
@@ -228,7 +226,7 @@ R_API PJ *pj_s(PJ *j, const char *k) {
 		pj_raw (j, ek);
 		free (ek);
 	} else {
-		eprintf ("cannot escape string\n");
+		R_LOG_WARN ("cannot escape string");
 	}
 	pj_raw (j, "\"");
 	return j;
@@ -286,24 +284,20 @@ R_API PJ *pj_n(PJ *j, ut64 n) {
 	r_return_val_if_fail (j, j);
 	pj_comma (j);
 	char numstr[32];
-	snprintf (numstr, sizeof (numstr), "%" PFMT64u, n);
+	if (j->num_encoding == PJ_ENCODING_NUM_STR) {
+		snprintf (numstr, sizeof (numstr), "\"%" PFMT64u "\"", n);
+	} else if (j->num_encoding == PJ_ENCODING_NUM_HEX) {
+		snprintf (numstr, sizeof (numstr), "\"0x%" PFMT64x "\"", n);
+	} else {
+		snprintf (numstr, sizeof (numstr), "%" PFMT64u, n);
+	}
 	pj_raw (j, numstr);
 	return j;
 }
 
 R_API PJ *pj_ne(PJ *j, ut64 n) {
-	char numstr[32];
 	r_return_val_if_fail (j, j);
-	pj_comma (j);
-	if (j->num_encoding == PJ_ENCODING_NUM_STR) {
-		snprintf (numstr, sizeof (numstr), "\"%" PFMT64u "\"", n);
-		pj_raw (j, numstr);
-	} else if (j->num_encoding == PJ_ENCODING_NUM_HEX) {
-		snprintf (numstr, sizeof (numstr), "\"0x%" PFMT64x "\"", n);
-		pj_raw (j, numstr);
-	} else {
-		pj_n (j, n);
-	}
+	pj_n (j, n);
 	return j;
 }
 

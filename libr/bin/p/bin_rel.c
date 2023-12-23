@@ -4,6 +4,7 @@
 #include <r_util.h>
 #include <r_lib.h>
 #include <r_bin.h>
+#include <r_io.h>
 #include <string.h>
 
 #define MAX_SECTION_COUNT 128
@@ -176,7 +177,7 @@ static bool vwriten_at_be32(RBin *b, ut32 vaddr, ut32 val, ut32 size) {
 	ut8 buf[4];
 	r_write_be32 (&buf, val);
 	assert (size <= sizeof (buf));
-	return b->iob.write_at (b->iob.io, vaddr, (void *)&buf, size);
+	return b->iob.overlay_write_at (b->iob.io, vaddr, (void *)&buf, size);
 }
 
 static bool file_has_rel_ext(RBinFile *bf) {
@@ -210,7 +211,7 @@ static LoadedRel *load_rel_header(RBinFile *bf) {
 	return rel;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	if (!file_has_rel_ext (bf)) {
 		return false;
 	}
@@ -226,7 +227,7 @@ static bool check_buffer(RBinFile *bf, RBuffer *buf) {
 }
 
 // RBinPlugin method setting up sections and fixing up PIC.
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	RelSection *sections = NULL;
 	int i;
 	int num_imps;
@@ -243,7 +244,7 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 	if (rel->hdr.module_version == 3) {
 		if (r_buf_fread_at (bf->buf, 0x40, (void *)&rel->v3, "3I", 1) == -1) {
 			free (rel);
-			return NULL;
+			return false;
 		}
 	}
 
@@ -300,7 +301,7 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 		rel->libname = "";
 	}
 
-	*bin_obj = rel;
+	bf->bo->bin_obj = rel;
 	return true;
 
 beach:
@@ -314,7 +315,7 @@ beach:
 
 static void destroy(RBinFile *bf) {
 	int i;
-	const LoadedRel *rel = bf->o->bin_obj;
+	const LoadedRel *rel = bf->bo->bin_obj;
 	if (!rel) {
 		return;
 	}
@@ -330,7 +331,7 @@ static void destroy(RBinFile *bf) {
 }
 
 static ut64 baddr(RBinFile *bf) {
-	return bf->o->baddr;
+	return bf->bo->baddr;
 }
 
 static RList *sections(RBinFile *bf) {
@@ -338,7 +339,7 @@ static RList *sections(RBinFile *bf) {
 	RList *ret;
 	const RelSection *rel_s;
 	RBinSection *s;
-	const LoadedRel *rel = bf->o->bin_obj;
+	const LoadedRel *rel = bf->bo->bin_obj;
 	if (!(ret = r_list_new ())) {
 		return NULL;
 	}
@@ -355,7 +356,7 @@ static RList *sections(RBinFile *bf) {
 			break;
 		}
 		s->paddr = rel_section_paddr (rel_s);
-		s->vaddr = bf->o->baddr + s->paddr;
+		s->vaddr = bf->bo->baddr + s->paddr;
 		s->size = s->vsize = rel_s->size;
 		s->add = true;
 		if (s->paddr == 0) {
@@ -368,7 +369,7 @@ static RList *sections(RBinFile *bf) {
 			s->name = strdup ("bss");
 			assert (s->name);
 			// Place after end of REL file
-			s->vaddr = bf->o->baddr + bf->size + 0x3c;
+			s->vaddr = bf->bo->baddr + bf->size + 0x3c;
 		} else if (executable) {
 			s->name = r_str_newf ("text_%d", i);
 		} else {
@@ -388,20 +389,19 @@ static RList *sections(RBinFile *bf) {
 }
 
 static void register_header_symbol(RBinFile *bf, RList *syms, const char *name, ut8 section, ut32 offset) {
-	const LoadedRel *rel = bf->o->bin_obj;
+	const LoadedRel *rel = bf->bo->bin_obj;
 	if (section == 0 || section >= rel->hdr.num_sections) {
 		return;
 	}
 	RBinSymbol *ret = R_NEW0 (RBinSymbol);
-	if (!ret) {
-		return;
+	if (R_LIKELY (ret)) {
+		ret->type = R_BIN_TYPE_FUNC_STR;
+		ret->libname = strdup (rel->libname);
+		ret->name = r_bin_name_new (name);
+		ret->paddr = rel_section_paddr (&rel->sections[section]) + offset;
+		ret->vaddr = bf->bo->baddr + ret->paddr;
+		r_list_append (syms, ret);
 	}
-	ret->type = R_BIN_TYPE_FUNC_STR;
-	ret->libname = strdup (rel->libname);
-	ret->name = strdup (name);
-	ret->paddr = rel_section_paddr (&rel->sections[section]) + offset;
-	ret->vaddr = bf->o->baddr + ret->paddr;
-	r_list_append (syms, ret);
 }
 
 static RList *symbols(RBinFile *bf) {
@@ -410,7 +410,7 @@ static RList *symbols(RBinFile *bf) {
 		return NULL;
 	}
 
-	const LoadedRel *rel = bf->o->bin_obj;
+	const LoadedRel *rel = bf->bo->bin_obj;
 	register_header_symbol (bf, syms, "prolog", rel->hdr.prolog_section, rel->hdr.prolog_offset);
 	register_header_symbol (bf, syms, "epilog", rel->hdr.epilog_section, rel->hdr.epilog_offset);
 	register_header_symbol (bf, syms, "unresolved", rel->hdr.unresolved_section, rel->hdr.unresolved_offset);
@@ -456,6 +456,10 @@ static bool reloc_step_vaddr(const LoadedRel *rel, const RelReloc *reloc, ut32 *
 #define hi(x) (((x) >> 16) & 0xffff)
 #define ha(x) ((((x) >> 16) + (((x)&0x8000) ? 1 : 0)) & 0xffff)
 
+static bool _overlay_write_at_hack(RIO *io, ut64 addr, const ut8 *buf, int len) {
+	return true;
+}
+
 // Applies a relocation on the current program.
 // Does not generate RBinReloc/RBinImport entries.
 static RBinReloc *patch_reloc(RBin *b, const LoadedRel *rel, const RelReloc *reloc, ut32 module, ut32 P) {
@@ -496,12 +500,14 @@ static RBinReloc *patch_reloc(RBin *b, const LoadedRel *rel, const RelReloc *rel
 	case R_PPC_ADDR16_HI:  size = 2; value = set_half16(value, hi(S + A));       break;
 	case R_PPC_ADDR16_HA:  size = 2; value = set_half16(value, ha(S + A));       break;
 	default:
-		R_LOG_ERROR ("REL: Unsupported reloc type %d", reloc->type);
+		if (b->iob.overlay_write_at != _overlay_write_at_hack) {
+			R_LOG_ERROR ("REL: Unsupported reloc type %d", reloc->type);
+		}
 		return NULL;
 	}
 	// clang-format on
 
-	if (r_log_match (R_LOGLVL_DEBUG, R_LOG_ORIGIN)) {
+	if (r_log_match (R_LOGLVL_DEBUG, R_LOG_ORIGIN) && b->iob.overlay_write_at != _overlay_write_at_hack) {
 		assert (size > 0 && size <= 8);
 		char value_old_hex[9], value_new_hex[9];
 		char fmt[] = "%08x";
@@ -534,27 +540,25 @@ static RBinReloc *patch_reloc(RBin *b, const LoadedRel *rel, const RelReloc *rel
 	}
 	ret->addend = A;
 	ret->vaddr = P;
-	RBinSection *s = r_bin_get_section_at (b->cur->o, P, true);
+	RBinSection *s = r_bin_get_section_at (b->cur->bo, P, true);
 	if (s && s->paddr != 0) {
-		ret->paddr = P - b->cur->o->baddr;
+		ret->paddr = P - b->cur->bo->baddr;
 	}
 	return ret;
 }
 
-static RList *patch_relocs(RBin *b) {
-	if (!b->iob.io->cached) {
-		R_LOG_WARN ("run r2 with -e bin.cache=true to fix relocations in disassembly");
-		return NULL;
-	}
-
+static RList *patch_relocs(RBinFile *bf) {
 	int i, j;
-	const LoadedRel *rel = b->cur->o->bin_obj;
+	RBin *b = bf->rbin;
+	const LoadedRel *rel = b->cur->bo->bin_obj;
 
 	RList *ret = r_list_new ();
 	for (i = 0; i < rel->num_imps; i++) {
 		const RelImp *imp = &rel->imps[i];
 		if (imp->module != 0 && imp->module != rel->hdr.module_id) {
-			R_LOG_ERROR ("Imports from other REL (%08x) not yet implemented", imp->module);
+			if (b->iob.overlay_write_at != _overlay_write_at_hack) {
+				R_LOG_ERROR ("Imports from other REL (%08x) not yet implemented", imp->module);
+			}
 			continue;
 		}
 
@@ -572,6 +576,18 @@ static RList *patch_relocs(RBin *b) {
 			}
 		}
 	}
+	return ret;
+}
+
+static RList *relocs(RBinFile *bf) {
+	if (!bf || !bf->rbin) {
+		return NULL;
+	}
+	RBin *b = bf->rbin;
+	void *tmp = b->iob.overlay_write_at;
+	b->iob.overlay_write_at = _overlay_write_at_hack;
+	RList *ret = patch_relocs (bf);
+	b->iob.overlay_write_at = tmp;
 	return ret;
 }
 
@@ -594,16 +610,19 @@ static RBinInfo *info(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_rel = {
-	.name = "rel",
-	.desc = "Nintendo Wii REL format",
-	.license = "LGPL3",
-	.author = "terorie",
-	.check_buffer = &check_buffer,
-	.load_buffer = &load_buffer,
+	.meta = {
+		.name = "rel",
+		.desc = "Nintendo Wii REL format",
+		.license = "LGPL3",
+		.author = "terorie",
+	},
+	.check = &check,
+	.load = &load,
 	.destroy = &destroy,
 	.baddr = &baddr,
 	.sections = &sections,
 	.symbols = &symbols,
+	.relocs = &relocs,
 	.info = &info,
 	.patch_relocs = &patch_relocs
 };

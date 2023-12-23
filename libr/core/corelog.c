@@ -5,7 +5,7 @@
 R_API int r_core_log_list(RCore *core, int n, int nth, char fmt) {
 	r_return_val_if_fail (core && core->log, 0);
 	int printed = 0;
-	int count = 0, i, idx, id = core->log->first;
+	int count = 0, idx, id = core->log->first;
 	RStrpool *sp = core->log->sp;
 	char *str = sp->str;
 	PJ *pj = NULL;
@@ -14,7 +14,7 @@ R_API int r_core_log_list(RCore *core, int n, int nth, char fmt) {
 		pj = r_core_pj_new (core);
 		pj_a (pj);
 	}
-	for (i = idx = 0; str && *str; i++, id++) {
+	for (idx = 0; str && *str; id++) {
 		if ((n && n <= id) || !n) {
 			switch (fmt) {
 			case 'j':
@@ -88,6 +88,7 @@ R_API void r_core_log_init(RCoreLog *log) {
 
 R_API void r_core_log_free(RCoreLog *log) {
 	if (log) {
+		r_log_fini ();
 		r_strpool_free (log->sp);
 		free (log);
 	}
@@ -130,7 +131,10 @@ R_API char *r_core_log_get(RCore *core, int index) {
 }
 
 R_API void r_core_log_add(RCore *core, const char *msg) {
-	r_return_if_fail (core && core->log);
+	// NOTE we cant use r_return here because it can create a recursive loop
+	if (!core || !core->log) {
+		return;
+	}
 	r_strpool_append (core->log->sp, msg);
 	core->log->last++;
 	if (R_STR_ISNOTEMPTY (core->cmdlog)) {

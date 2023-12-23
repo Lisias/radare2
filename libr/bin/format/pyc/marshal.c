@@ -763,7 +763,7 @@ static pyc_object *copy_object(pyc_object *object) {
 			break;
 		case TYPE_TUPLE:
 		case TYPE_SMALL_TUPLE:
-			copy->data = r_list_clone (object->data);
+			copy->data = r_list_clone (object->data, NULL);
 			break;
 		case TYPE_INT:
 		case TYPE_INT64:
@@ -1155,7 +1155,7 @@ static bool extract_sections_symbols(pyc_object *obj, RList *sections, RList *sy
 		goto fail;
 	}
 	// start building symbol
-	symbol->name = strdup (prefix);
+	symbol->name = r_bin_name_new (prefix);
 	//symbol->bind;
 	symbol->type = R_BIN_TYPE_FUNC_STR;
 	symbol->size = cobj->end_offset - cobj->start_offset;

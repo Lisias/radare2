@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2022 - pancake */
+/* radare - LGPL - Copyright 2009-2023 - pancake */
 
 #include <r_reg.h>
 
@@ -59,6 +59,9 @@ R_API ut64 r_reg_get_value_big(RReg *reg, RRegItem *item, utX *val) {
 
 R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 	r_return_val_if_fail (reg && item, 0);
+	if (item->offset == -2) {
+		return UT64_MAX;
+	}
 	if (item->offset == -1) {
 		return 0LL;
 	}
@@ -104,11 +107,29 @@ R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 			return r_read_me27 (regset->arena->bytes + off, 0);
 		}
 		break;
+	case 24:
+		if (off + 3 <= regset->arena->size) {
+			return r_read_ble24 (regset->arena->bytes + off, be);
+		}
+		R_LOG_WARN ("24bit oob read %d", off);
+		break;
 	case 32:
 		if (off + 4 <= regset->arena->size) {
 			return r_read_ble32 (regset->arena->bytes + off, be);
 		}
 		R_LOG_WARN ("32bit oob read %d", off);
+		break;
+	case 40:
+		if (off + 8 <= regset->arena->size) {
+			return r_read_ble64 (regset->arena->bytes + off, be) & 0xFFFFFFFFFF;
+		}
+		R_LOG_WARN ("48bit oob read %d", off);
+		break;
+	case 48:
+		if (off + 8 <= regset->arena->size) {
+			return r_read_ble64 (regset->arena->bytes + off, be) & 0xFFFFFFFFFFFF;
+		}
+		R_LOG_WARN ("48bit oob read %d", off);
 		break;
 	case 64:
 		if (regset->arena && regset->arena->bytes && (off + 8 <= regset->arena->size)) {
@@ -128,7 +149,13 @@ R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 		// XXX 128 & 256 bit
 		{
 			long double ld = r_reg_get_longdouble (reg, item);
-			return isnan (ld)? UT64_MAX: (ut64)ld;
+			if (isnan (ld)) {
+				return UT64_MAX;
+			}
+			if (ld >= (long double)UT64_MIN && fmaxl (ld, (long double) UT64_MAX) != ld) {
+				return (ut64) ld;
+			}
+			return UT64_MAX;
 		}
 	default:
 		R_LOG_WARN ("Bit size %d not supported", item->size);
@@ -150,11 +177,9 @@ R_API ut64 r_reg_get_value_by_role(RReg *reg, RRegisterId role) {
 
 R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
 	r_return_val_if_fail (reg && item, false);
-
-	ut8 bytes[12] = {0};
+	ut8 bytes[32] = {0};
 	ut8 *src = bytes;
-
-	if (r_reg_is_readonly (reg, item)) {
+	if (item->ro) {
 		return true;
 	}
 	if (item->offset < 0) {
@@ -164,7 +189,7 @@ R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
 	if (!arena) {
 		return false;
 	}
-	bool be = reg->config? R_ARCH_CONFIG_IS_BIG_ENDIAN (reg->config): false;
+	const bool be = reg->config? R_ARCH_CONFIG_IS_BIG_ENDIAN (reg->config): false;
 	switch (item->size) {
 	case 80:
 	case 96: // long floating value
@@ -178,6 +203,21 @@ R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
 		break;
 	case 16:
 		r_write_ble16 (src, value, be);
+		break;
+	case 24:
+		r_write_ble24 (src, value, be);
+		break;
+	case 4:
+		// read from buffer fill the gaps
+		{
+			ut8 tmp;
+			ut8 *buf = arena->bytes + (item->offset / 8);
+			tmp = *buf;
+			tmp >>= 4;
+			tmp <<= 4;
+			tmp |= (value & 0xf);
+			*buf = tmp;
+		}
 		break;
 	case 8:
 		r_write_ble8 (src, (ut8) (value & UT8_MAX));
@@ -201,7 +241,11 @@ R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
 		}
 		return true;
 	case 128:
+		// function takes an ut64 as argument, which doesnt allow us to reach 128
+		r_write_ble64 (src, value, be);
+		break;
 	case 256:
+		R_LOG_DEBUG ("TODO: 256 bit register handling not implemented");
 		// XXX 128 & 256 bit
 		return false; // (ut64)r_reg_get_longdouble (reg, item);
 	default:

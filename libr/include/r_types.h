@@ -16,10 +16,10 @@
 
 // TODO: fix this to make it crosscompile-friendly: R_SYS_OSTYPE ?
 /* operating system */
-#undef __BSD__
+#undef R2__BSD__
 #undef __KFBSD__
-#undef __UNIX__
-#undef __WINDOWS__
+#undef R2__UNIX__
+#undef R2__WINDOWS__
 
 #define R_MODE_PRINT 0x000
 #define R_MODE_RADARE 0x001
@@ -28,8 +28,9 @@
 #define R_MODE_JSON 0x008
 #define R_MODE_ARRAY 0x010
 #define R_MODE_SIMPLEST 0x020
-#define R_MODE_CLASSDUMP 0x040
+#define R_MODE_CLASSDUMP 0x040 /* deprecate maybe */
 #define R_MODE_EQUAL 0x080
+#define R_MODE_KV 0x100
 
 #define R_IN /* do not use, implicit */
 #define R_OUT /* parameter is written, not read */
@@ -82,11 +83,11 @@
 #define R_PERM_RX	(R_PERM_R|R_PERM_X)
 #define R_PERM_RWX	(R_PERM_R|R_PERM_W|R_PERM_X)
 #define R_PERM_WX	(R_PERM_W|R_PERM_X)
-#define R_PERM_SHAR	8
+#define R_PERM_S	8
+#define R_PERM_SHAR	8 /* just S_PERM, instead of _SHAR -- R2_590 */
 #define R_PERM_PRIV	16
 #define R_PERM_ACCESS	32
 #define R_PERM_CREAT	64
-#define R_PERM_RELOC	128
 
 
 // HACK to fix capstone-android-mips build
@@ -167,47 +168,50 @@
   #define restrict
   #define strcasecmp stricmp
   #define strncasecmp strnicmp
-  #define __WINDOWS__ 1
+  #define R2__WINDOWS__ 1
 
   #include <time.h>
   static inline struct tm *gmtime_r(const time_t *t, struct tm *r) { return (gmtime_s(r, t))? NULL : r; }
 #endif
 
 #ifdef __HAIKU__
-# define __UNIX__ 1
+# define R2__UNIX__ 1
 #endif
 
 #undef HAVE_PTY
 #if EMSCRIPTEN || __wasi__ || defined(__serenity__)
 #define HAVE_PTY 0
 #else
-#define HAVE_PTY __UNIX__ && LIBC_HAVE_FORK && !__sun
+#define HAVE_PTY R2__UNIX__ && LIBC_HAVE_FORK && !__sun
 #endif
 
-#if defined(EMSCRIPTEN) || defined(__wasi__) || defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || defined(__ANDROID__) || defined(__QNX__) || defined(__sun) || defined(__HAIKU__) || defined(__serenity__) || defined(__vinix__)
-  #define __BSD__ 0
-  #define __UNIX__ 1
+#if defined(EMSCRIPTEN) || defined(__wasi__) || defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || defined(__ANDROID__) || defined(__QNX__) || defined(__sun) || defined(__HAIKU__) || defined(__serenity__) || defined(__vinix__) || defined(_AIX)
+  #define R2__BSD__ 0
+  #define R2__UNIX__ 1
 #endif
 #if __KFBSD__ || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
-  #define __BSD__ 1
-  #define __UNIX__ 1
+  #define R2__BSD__ 1
+  #define R2__UNIX__ 1
 #endif
-#if __WINDOWS__ || _WIN32
+#if R2__WINDOWS__ || _WIN32
   #ifdef _MSC_VER
   /* Must be included before windows.h */
+#ifndef WINSOCK_INCLUDED
+#define WINSOCK_INCLUDED 1
   #include <winsock2.h>
   #include <ws2tcpip.h>
+#endif
   #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
   #endif
   #endif
   typedef int socklen_t;
   #undef USE_SOCKETS
-  #define __WINDOWS__ 1
-  #undef __UNIX__
-  #undef __BSD__
+  #define R2__WINDOWS__ 1
+  #undef R2__UNIX__
+  #undef R2__BSD__
 #endif
-#if __WINDOWS__ || _WIN32
+#if R2__WINDOWS__ || _WIN32
   #define __addr_t_defined
   #include <windows.h>
 #endif
@@ -269,7 +273,7 @@ extern "C" {
 
 // TODO: FS or R_SYS_DIR ??
 #undef FS
-#if __WINDOWS__
+#if R2__WINDOWS__
 #define FS '\\'
 #define R_SYS_DIR "\\"
 #define R_SYS_ENVSEP ";"
@@ -319,7 +323,7 @@ typedef int (*PrintfCallback)(const char *str, ...) R_PRINTF_CHECK(1, 2);
 #elif R_INLINE
   #define R_API inline
 #else
-  #if __WINDOWS__
+  #if R2__WINDOWS__
     #define R_API __declspec(dllexport)
   #elif defined(__GNUC__) && __GNUC__ >= 4
     #define R_API __attribute__((visibility("default")))
@@ -363,8 +367,8 @@ static inline void *r_new_copy(int size, void *data) {
 	((char *)(((size_t)(v) + (t - 1)) \
 	& ~(t - 1)))
 
-#define R_BIT_SET(x,y) (((ut8*)x)[y>>4] |= (1<<(y&0xf)))
-#define R_BIT_UNSET(x,y) (((ut8*)x)[y>>4] &= ~(1<<(y&0xf)))
+#define R_BIT_SET(x,y) (((ut8*)x)[(y)>>4] |= (1<<((y)&0xf)))
+#define R_BIT_UNSET(x,y) (((ut8*)x)[(y)>>4] &= ~(1<<((y)&0xf)))
 #define R_BIT_TOGGLE(x, y) ( R_BIT_CHK (x, y) ? \
 		R_BIT_UNSET (x, y): R_BIT_SET (x, y))
 
@@ -392,7 +396,7 @@ static inline void *r_new_copy(int size, void *data) {
 #define r_sys_perror(x) r_sys_perror_str(x);
 #endif
 
-#if __UNIX__
+#if R2__UNIX__
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -423,13 +427,13 @@ static inline void *r_new_copy(int size, void *data) {
 
 #define R_FREE(x) { free((void *)x); x = NULL; }
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 #define HAVE_REGEXP 0
 #else
 #define HAVE_REGEXP 1
 #endif
 
-#if __WINDOWS__
+#if R2__WINDOWS__
 #define PFMT64x "I64x"
 #define PFMT64d "I64d"
 #define PFMT64u "I64u"
@@ -521,7 +525,7 @@ static inline void *r_new_copy(int size, void *data) {
 # else
 # define R_SYS_BASE ((ut64)0x1000)
 # endif
-#elif __WINDOWS__
+#elif R2__WINDOWS__
 # define R_SYS_BASE ((ut64)0x01001000)
 #else // linux, bsd, ...
 # if __arm__ || __arm64__
@@ -569,7 +573,7 @@ static inline void *r_new_copy(int size, void *data) {
 #define R_SYS_BITS R_SYS_BITS_32
 #define R_SYS_ENDIAN 0
 #elif __s390x__
-#define R_SYS_ARCH "sysz"
+#define R_SYS_ARCH "s390x"
 #define R_SYS_BITS R_SYS_BITS_64
 #define R_SYS_ENDIAN 1
 #elif __sparc__
@@ -668,7 +672,7 @@ typedef enum {
 
 
 #define HAS_CLOCK_NANOSLEEP 0
-#if defined(__wasi__)
+#if defined(__wasi__) || defined(_AIX)
 # define HAS_CLOCK_MONOTONIC 0
 #elif CLOCK_MONOTONIC && MONOTONIC_UNIX
 # define HAS_CLOCK_MONOTONIC 1
@@ -691,7 +695,7 @@ typedef enum {
 #define R_SYS_OS "darwin"
 #elif defined (__linux__)
 #define R_SYS_OS "linux"
-#elif defined (__WINDOWS__)
+#elif defined (R2__WINDOWS__)
 #define R_SYS_OS "windows"
 #elif defined (__NetBSD__ )
 #define R_SYS_OS "netbsd"
@@ -701,6 +705,8 @@ typedef enum {
 #define R_SYS_OS "freebsd"
 #elif defined (__HAIKU__)
 #define R_SYS_OS "haiku"
+#elif defined (_AIX)
+#define R_SYS_OS "aix"
 #else
 #define R_SYS_OS "unknown"
 #endif

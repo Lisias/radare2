@@ -47,26 +47,30 @@ static ut64 buf_get_size(RBuffer *b) {
 static st64 buf_read(RBuffer *b, ut8 *buf, size_t len) {
 	r_return_val_if_fail (b && b->methods, -1);
 	const RBufferRead bufread = b->methods->read;
-	return bufread? bufread (b, buf, len): -1;
+	r_return_val_if_fail (bufread, -1);
+	return bufread (b, buf, len);
 }
 
 static st64 buf_write(RBuffer *b, const ut8 *buf, size_t len) {
 	r_return_val_if_fail (b && b->methods, -1);
 	buf_wholefree (b);
 	const RBufferWrite bufwrite = b->methods->write;
-	return bufwrite? bufwrite (b, buf, len): -1;
+	r_return_val_if_fail (bufwrite, -1);
+	return bufwrite (b, buf, len);
 }
 
 static st64 buf_seek(RBuffer *b, st64 addr, int whence) {
 	r_return_val_if_fail (b && b->methods, -1);
 	const RBufferSeek bufseek = b->methods->seek;
-	return bufseek? bufseek (b, addr, whence): -1;
+	r_return_val_if_fail (bufseek, -1);
+	return bufseek (b, addr, whence);
 }
 
 static bool buf_resize(RBuffer *b, ut64 newsize) {
 	r_return_val_if_fail (b && b->methods, -1);
 	const RBufferResize bufresize = b->methods->resize;
-	return bufresize? bufresize (b, newsize): false;
+	r_return_val_if_fail (bufresize, false);
+	return bufresize (b, newsize);
 }
 
 static ut8 *get_whole_buf(RBuffer *b, ut64 *sz) {
@@ -286,7 +290,7 @@ R_API bool r_buf_prepend_bytes(RBuffer *b, const ut8 *buf, ut64 length) {
 	return r_buf_insert_bytes (b, 0, buf, length) >= 0;
 }
 
-R_API char *r_buf_to_string(RBuffer *b) {
+R_API char *r_buf_tostring(RBuffer *b) {
 	ut64 sz = r_buf_size (b);
 	char *s = malloc (sz + 1);
 	if (!s) {

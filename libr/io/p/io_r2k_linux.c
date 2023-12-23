@@ -234,7 +234,7 @@ static void print_help(RIO *io, char *cmd, int p_usage) {
 		":dp [pid]        Print current selected pid or change it",
 		":e r2k.io=[012]  Read/Write from 0: Linear, 1: Process, 2: Physical addresses"
 	};
-	const char *help_msg_old[] = {
+	RCoreHelpMessage help_msg_old = {
 		":M                      Print kernel memory map",
 		":b      beid [pid]      Change r2k backend. pid is required when beid is 1.",
 		"                         0: linear address; 1: process address; 2: physical address",
@@ -402,7 +402,6 @@ int run_old_command(RIO *io, RIODesc *iodesc, const char *buf) {
 		break;
 	case 'b':
 		{
-			char *cmd = NULL;
 			if (buf[1] != ' ') {
 				io->cb_printf ("beid: %d\n", r2k_struct.beid);
 				io->cb_printf ("pid:  %d\n", r2k_struct.pid);
@@ -424,16 +423,7 @@ int run_old_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			}
 			r2k_struct.beid = beid;
 			r2k_struct.pid = (beid == 1) ? pid : 0;
-
-			cmd = (char *) malloc (27);
-			if (!cmd) {
-				io->cb_printf ("io_r2k_linux : Malloc failed. Seeking to 0x0\n");
-				io->coreb.cmd (io->coreb.core, "s 0");
-			} else {
-				sprintf (cmd, "s 0x%"PFMT64x, io->off);
-				io->coreb.cmd (io->coreb.core, cmd);
-				free (cmd);
-			}
+			io->coreb.cmdf (io->coreb.core, "s 0x%"PFMT64x, io->off);
 		}
 		break;
 	case 'r':

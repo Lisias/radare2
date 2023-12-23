@@ -39,7 +39,7 @@ typedef struct r_flag_item_t {
 	char *name;     /* unique name, escaped to avoid issues with r2 shell */
 	char *realname; /* real name, without any escaping */
 	bool demangled; /* real name from demangling? */
-	ut64 offset;    /* offset flagged by this item */
+	ut64 offset;    /* offset flagged by this item */ // R2_600 - rename to addr
 	ut64 size;      /* size of the flag item */
 	RSpace *space;  /* flag space this item belongs to */
 	char *color;    /* item color */
@@ -61,6 +61,7 @@ typedef struct r_flag_t {
 	ut64 mask;
 	RThreadLock *lock;
 	R_DIRTY_VAR;
+	// ??? RStrpool *pool; // stringpool can be tricky because removing flags wont free memory
 } RFlag;
 
 /* compile time dependency */
@@ -101,7 +102,7 @@ R_API void r_flag_bind(RFlag *io, RFlagBind *bnd);
 
 #ifdef R_API
 R_API RFlag *r_flag_new(void);
-R_API RFlag *r_flag_free(RFlag *f);
+R_API void r_flag_free(RFlag *f);
 R_API void r_flag_list(RFlag *f, int rad, const char *pfx);
 R_API bool r_flag_exist_at(RFlag *f, const char *flag_prefix, ut16 fp_size, ut64 off);
 R_API RFlagItem *r_flag_get(RFlag *f, const char *name);

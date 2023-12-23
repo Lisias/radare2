@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2022 - pancake, ret2libc */
+/* radare - LGPL - Copyright 2007-2023 - pancake, ret2libc */
 
 #include <r_flag.h>
 #include <r_util.h>
@@ -18,7 +18,7 @@ static const char *str_callback(RNum *user, ut64 off, int *ok) {
 	}
 	if (f) {
 		const RList *list = r_flag_get_list (f, off);
-		RFlagItem *item = r_list_get_top (list);
+		RFlagItem *item = r_list_last (list);
 		if (item) {
 			if (ok) {
 				*ok = true;
@@ -142,6 +142,7 @@ static char *filter_item_name(const char *name) {
 }
 
 static void set_name(RFlagItem *item, char *name) {
+	r_return_if_fail (item && name);
 	free_item_name (item);
 	item->name = name;
 	free_item_realname (item);
@@ -169,31 +170,30 @@ static bool update_flag_item_offset(RFlag *f, RFlagItem *item, ut64 newoff, bool
 }
 
 static bool update_flag_item_name(RFlag *f, RFlagItem *item, const char *newname, bool force) {
-	if (!f || !item || !newname) {
-		return false;
-	}
+	r_return_val_if_fail (f && item && newname, false);
 	if (!force && (item->name == newname || (item->name && !strcmp (item->name, newname)))) {
 		return false;
 	}
 	char *fname = filter_item_name (newname);
-	if (!fname) {
-		return false;
+	if (fname) {
+		bool res = (item->name)
+			? ht_pp_update_key (f->ht_name, item->name, fname)
+			: ht_pp_insert (f->ht_name, fname, item);
+		if (res) {
+			set_name (item, fname);
+			R_DIRTY (f);
+			return true;
+		}
+		free (fname);
 	}
-	bool res = (item->name)
-		? ht_pp_update_key (f->ht_name, item->name, fname)
-		: ht_pp_insert (f->ht_name, fname, item);
-	if (res) {
-		set_name (item, fname);
-		R_DIRTY (f);
-		return true;
-	}
-	free (fname);
 	return false;
 }
 
 static void ht_free_flag(HtPPKv *kv) {
-	free (kv->key);
-	r_flag_item_free (kv->value);
+	if (kv) {
+		free (kv->key);
+		r_flag_item_free (kv->value);
+	}
 }
 
 static bool count_flags(RFlagItem *fi, void *user) {
@@ -280,18 +280,18 @@ R_API void r_flag_item_free(RFlagItem *item) {
 	free (item);
 }
 
-R_API RFlag *r_flag_free(RFlag *f) {
-	r_return_val_if_fail (f, NULL);
-	r_th_lock_free (f->lock);
-	f->lock = NULL;
-	r_skiplist_free (f->by_off);
-	ht_pp_free (f->ht_name);
-	sdb_free (f->tags);
-	r_spaces_fini (&f->spaces);
-	r_num_free (f->num);
-	r_list_free (f->zones);
-	free (f);
-	return NULL;
+R_API void r_flag_free(RFlag *f) {
+	if (f) {
+		r_th_lock_free (f->lock);
+		f->lock = NULL;
+		r_skiplist_free (f->by_off);
+		ht_pp_free (f->ht_name);
+		sdb_free (f->tags);
+		r_spaces_fini (&f->spaces);
+		r_num_free (f->num);
+		r_list_free (f->zones);
+		free (f);
+	}
 }
 
 static bool print_flag_name(RFlagItem *fi, void *user) {
@@ -318,7 +318,7 @@ static bool print_flag_json(RFlagItem *flag, void *user) {
 	}
 	pj_o (u->pj);
 	pj_ks (u->pj, "name", flag->name);
-	if (flag->name != flag->realname) {
+	if (flag->realname && flag->name != flag->realname) {
 		pj_ks (u->pj, "realname", flag->realname);
 	}
 	pj_ki (u->pj, "size", flag->size);
@@ -520,7 +520,7 @@ R_API RFlagItem *r_flag_get_i(RFlag *f, ut64 off) {
 		off &= f->mask;
 	}
 	const RList *list = r_flag_get_list (f, off);
-	return list? evalFlag (f, r_list_get_top (list)): NULL;
+	return list? evalFlag (f, r_list_last (list)): NULL;
 }
 
 /* return the first flag that matches an offset ordered by the order of
@@ -547,7 +547,7 @@ R_API RFlagItem *r_flag_get_by_spaces(RFlag *f, ut64 off, ...) {
 		goto beach;
 	}
 	if (r_list_length (list) == 1) {
-		ret = r_list_get_top (list);
+		ret = r_list_last (list);
 		goto beach;
 	}
 
@@ -783,7 +783,8 @@ R_API RFlagItem *r_flag_set(RFlag *f, const char *name, ut64 off, ut32 size) {
 	if (!item) {
 		item = R_NEW0 (RFlagItem);
 		if (!item) {
-			goto err;
+			r_flag_item_free (item);
+			return NULL;
 		}
 		is_new = true;
 	}
@@ -794,9 +795,6 @@ R_API RFlagItem *r_flag_set(RFlag *f, const char *name, ut64 off, ut32 size) {
 	update_flag_item_offset (f, item, off + f->base, is_new, true);
 	update_flag_item_name (f, item, name, true);
 	return item;
-err:
-	r_flag_item_free (item);
-	return NULL;
 }
 
 /* add/replace/remove the alias of a flag item */

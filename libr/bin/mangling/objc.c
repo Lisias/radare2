@@ -4,31 +4,30 @@
 #include "../i/private.h"
 
 R_API char *r_bin_demangle_objc(RBinFile *bf, const char *sym) {
-	r_return_val_if_fail ((!bf || (bf && bf->o && bf->o->classes)) && sym, NULL);
-	char *ret = NULL;
+	r_return_val_if_fail ((!bf || (bf && bf->bo && bf->bo->classes)) && sym, NULL);
 	char *clas = NULL;
 	char *name = NULL;
 	char *args = NULL;
 	int i, nargs = 0;
 	const char *type = NULL;
 
-	if (bf && bf->o && bf->o->classes) {
+	if (bf && bf->bo && bf->bo->classes) {
 		bf = NULL;
 	}
 	/* classes */
-	if (!strncmp (sym, "_OBJC_Class_", 12)) {
+	if (r_str_startswith (sym, "_OBJC_Class_")) {
 		const char *className = sym + 12;
-		ret = r_str_newf ("class %s", className);
+		char *ret = r_str_newf ("class %s", className);
 		if (bf) {
-			r_bin_file_add_class (bf, className, NULL, R_BIN_CLASS_PUBLIC);
+			r_bin_file_add_class (bf, className, NULL, R_BIN_ATTR_PUBLIC);
 		}
 		return ret;
 	}
-	if (!strncmp (sym, "_OBJC_CLASS_$_", 14)) {
+	if (r_str_startswith (sym, "_OBJC_CLASS_$_")) {
 		const char *className = sym + 14;
-		ret = r_str_newf ("class %s", className);
+		char *ret = r_str_newf ("class %s", className);
 		if (bf) {
-			r_bin_file_add_class (bf, className, NULL, R_BIN_CLASS_PUBLIC);
+			r_bin_file_add_class (bf, className, NULL, R_BIN_ATTR_PUBLIC);
 		}
 		return ret;
 	}
@@ -66,10 +65,10 @@ R_API char *r_bin_demangle_objc(RBinFile *bf, const char *sym) {
 					return NULL;
 				}
 				for (i = 0; name[i]; i++) {
-					if (name[i]==']') {
+					if (name[i] == ']') {
 						name[i] = 0;
 					}
-					if (name[i]==':') {
+					if (name[i] == ':') {
 						nargs++;
 						name[i] = 0;
 					}
@@ -108,6 +107,7 @@ R_API char *r_bin_demangle_objc(RBinFile *bf, const char *sym) {
 			type = "static";
 		}
 	}
+	char *ret = NULL;
 	if (type) {
 		if (!strcmp (type, "field")) {
 			ret = r_str_newf ("field int %s::%s", clas, name);

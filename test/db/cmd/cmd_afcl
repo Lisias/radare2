@@ -9,7 +9,9 @@ EOF
 EXPECT=<<EOF
 amd64
 amd64syscall
+dlang
 ms
+p9
 reg
 swift
 EOF
@@ -73,6 +75,8 @@ afcl
 EOF
 EXPECT=<<EOF
 arm64
+dlang
+p9
 reg
 swift
 EOF

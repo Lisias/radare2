@@ -1,8 +1,5 @@
-/* radare - LGPL - Copyright 2015-2019 - pancake */
+/* radare - LGPL - Copyright 2015-2023 - pancake */
 
-#include <r_types.h>
-#include <r_util.h>
-#include <r_lib.h>
 #include <r_bin.h>
 
 typedef struct boot_img_hdr BootImage;
@@ -75,18 +72,13 @@ static int bootimg_header_load(BootImageObj *obj, Sdb *db) {
 }
 
 static Sdb *get_sdb(RBinFile *bf) {
-	RBinObject *o = bf->o;
-	BootImageObj *ao;
-	if (!o) {
-		return NULL;
-	}
-	ao = o->bin_obj;
+	BootImageObj *ao = (BootImageObj *)R_UNWRAP3 (bf, bo, bin_obj);
 	return ao? ao->kv: NULL;
 }
 
-static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadaddr, Sdb *sdb) {
+static bool load(RBinFile *bf, RBuffer *buf, ut64 loadaddr) {
 	BootImageObj *bio = R_NEW0 (BootImageObj);
-	if (!bio) {
+	if (R_UNLIKELY (!bio)) {
 		return false;
 	}
 	bio->kv = sdb_new0 ();
@@ -99,19 +91,19 @@ static bool load_buffer(RBinFile *bf, void **bin_obj, RBuffer *buf, ut64 loadadd
 		free (bio);
 		return false;
 	}
-	sdb_ns_set (sdb, "info", bio->kv);
-	*bin_obj = bio;
+	sdb_ns_set (bf->sdb, "info", bio->kv);
+	bf->bo->bin_obj = bio;
 	return true;
 }
 
 static void destroy(RBinFile *bf) {
-	BootImageObj *bio = bf->o->bin_obj;
+	BootImageObj *bio = bf->bo->bin_obj;
 	r_buf_free (bio->buf);
-	R_FREE (bf->o->bin_obj);
+	R_FREE (bf->bo->bin_obj);
 }
 
 static ut64 baddr(RBinFile *bf) {
-	BootImageObj *bio = bf->o->bin_obj;
+	BootImageObj *bio = bf->bo->bin_obj;
 	return bio? bio->bi.kernel_addr: 0;
 }
 
@@ -120,39 +112,35 @@ static RList *strings(RBinFile *bf) {
 }
 
 static RBinInfo *info(RBinFile *bf) {
-	RBinInfo *ret;
-	if (!bf || !bf->o || !bf->o->bin_obj) {
+	if (!bf || !bf->bo || !bf->bo->bin_obj) {
 		return NULL;
 	}
-	ret = R_NEW0 (RBinInfo);
-	if (!ret) {
-		return NULL;
+	RBinInfo *ret = R_NEW0 (RBinInfo);
+	if (R_LIKELY (ret)) {
+		ret->file = bf->file? strdup (bf->file): NULL;
+		ret->type = strdup ("Android Boot Image");
+		ret->os = strdup ("android");
+		ret->subsystem = strdup ("unknown");
+		ret->machine = strdup ("arm");
+		ret->arch = strdup ("arm");
+		ret->has_va = true;
+		ret->has_pi = false;
+		ret->bits = 16;
+		ret->big_endian = false;
+		ret->dbg_info = false;
+		ret->rclass = strdup ("image");
 	}
-
-	ret->lang = NULL;
-	ret->file = bf->file? strdup (bf->file): NULL;
-	ret->type = strdup ("Android Boot Image");
-	ret->os = strdup ("android");
-	ret->subsystem = strdup ("unknown");
-	ret->machine = strdup ("arm");
-	ret->arch = strdup ("arm");
-	ret->has_va = 1;
-	ret->has_pi = 0;
-	ret->bits = 16;
-	ret->big_endian = 0;
-	ret->dbg_info = 0;
-	ret->rclass = strdup ("image");
 	return ret;
 }
 
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	ut8 tmp[13];
 	int r = r_buf_read_at (buf, 0, tmp, sizeof (tmp));
 	return r > 12 && !strncmp ((const char *)tmp, "ANDROID!", 8);
 }
 
 static RList *entries(RBinFile *bf) {
-	BootImageObj *bio = bf->o->bin_obj;
+	BootImageObj *bio = R_UNWRAP3 (bf, bo, bin_obj);
 	RBinAddr *ptr = NULL;
 	if (!bio) {
 		return NULL;
@@ -173,7 +161,7 @@ static RList *entries(RBinFile *bf) {
 }
 
 static RList *sections(RBinFile *bf) {
-	BootImageObj *bio = bf->o->bin_obj;
+	BootImageObj *bio = bf->bo->bin_obj;
 	if (!bio) {
 		return NULL;
 	}
@@ -244,13 +232,15 @@ static RList *sections(RBinFile *bf) {
 }
 
 RBinPlugin r_bin_plugin_bootimg = {
-	.name = "bootimg",
-	.desc = "Android Boot Image",
-	.license = "LGPL3",
+	.meta = {
+		.name = "bootimg",
+		.desc = "Android Boot Image",
+		.license = "LGPL3",
+	},
 	.get_sdb = &get_sdb,
-	.load_buffer = &load_buffer,
+	.load = &load,
 	.destroy = &destroy,
-	.check_buffer = &check_buffer,
+	.check = &check,
 	.baddr = &baddr,
 	.sections = &sections,
 	.entries = entries,

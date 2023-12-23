@@ -45,23 +45,23 @@ extern "C" {
 
 */
 
-#define $00 1
-#define $01 8
-#define $10 2
-#define $11 16
-#define $20 4
-#define $21 32
-#define $30 (1 << 8)
-#define $31 (2 << 8)
-#define BRAILE_ONE $00+$01+$11+$21+$31
-#define BRAILE_TWO $00+$01+$11+$20+$30+$31
-#define BRAILE_TRI $00+$01+$11+$21+$30+$31
-#define BRAILE_FUR $00+$10+$11+$21+$31
-#define BRAILE_FIV $00+$01+$10+$21+$30
-#define BRAILE_SIX $01+$10+$20+$21+$30+$31
-#define BRAILE_SEV $00+$01+$11+$20+$30
-#define BRAILE_EIG $00+$01+$10+$11+$20+$21+$30+$31
-#define BRAILE_NIN $00+$01+$10+$11+$21+$30
+#define _BR00 1
+#define _BR01 8
+#define _BR10 2
+#define _BR11 16
+#define _BR20 4
+#define _BR21 32
+#define _BR30 (1 << 8)
+#define _BR31 (2 << 8)
+#define _BRAILE_ONE _BR00+_BR01+_BR11+_BR21+_BR31
+#define _BRAILE_TWO _BR00+_BR01+_BR11+_BR20+_BR30+_BR31
+#define _BRAILE_TRI _BR00+_BR01+_BR11+_BR21+_BR30+_BR31
+#define _BRAILE_FUR _BR00+_BR10+_BR11+_BR21+_BR31
+#define _BRAILE_FIV _BR00+_BR01+_BR10+_BR21+_BR30
+#define _BRAILE_SIX _BR01+_BR10+_BR20+_BR21+_BR30+_BR31
+#define _BRAILE_SEV _BR00+_BR01+_BR11+_BR20+_BR30
+#define _BRAILE_EIG _BR00+_BR01+_BR10+_BR11+_BR20+_BR21+_BR30+_BR31
+#define _BRAILE_NIN _BR00+_BR01+_BR10+_BR11+_BR21+_BR30
 
 typedef struct {
 	char str[4];
@@ -141,10 +141,12 @@ typedef struct r_print_t {
 	int lines_abs;
 	bool esc_bslash;
 	bool wide_offsets;
-	const char *strconv_mode;
+	char *strconv_mode;
+	bool base36;
 	RList *vars;
 	char io_unalloc_ch;
 	bool show_offset;
+	char *codevarname;
 
 	// when true it uses row_offsets
 	bool calc_row_offsets;
@@ -165,6 +167,8 @@ typedef struct r_print_t {
 
 	// segmented memory addressing
 	int nbcolor;
+	int spinpos;
+	char *spinmsg;
 } RPrint;
 
 #ifdef R_API
@@ -178,8 +182,9 @@ R_API void r_print_set_is_interrupted_cb(RPrintIsInterruptedCallback cb);
 /* ... */
 R_API char *r_print_hexpair(RPrint *p, const char *str, int idx);
 R_API void r_print_hex_from_bin(RPrint *p, char *bin_str);
+R_API void r_print_bin_from_str(RPrint *p, char *str);
 R_API RPrint *r_print_new(void);
-R_API RPrint *r_print_free(RPrint *p);
+R_API void r_print_free(RPrint *p);
 R_API bool r_print_mute(RPrint *p, int x);
 R_API void r_print_set_flags(RPrint *p, int _flags);
 R_API void r_print_unset_flags(RPrint *p, int flags);
@@ -236,10 +241,11 @@ R_API int r_print_date_hfs(RPrint *p, const ut8 *buf, int len);
 R_API int r_print_date_w32(RPrint *p, const ut8 *buf, int len);
 R_API int r_print_date_unix(RPrint *p, const ut8 *buf, int len);
 R_API int r_print_date_get_now(RPrint *p, char *str);
-R_API void r_print_zoom(RPrint *p, void *user, RPrintZoomCallback cb, ut64 from, ut64 to, int len, int maxlen);
-R_API void r_print_zoom_buf(RPrint *p, void *user, RPrintZoomCallback cb, ut64 from, ut64 to, int len, int maxlen);
-R_API void r_print_progressbar(RPrint *pr, int pc, int _cols);
+R_API void r_print_zoom(RPrint *p, RPrintZoomCallback cb, void *cbarg, ut64 from, ut64 to, int len, int maxlen);
+R_API void r_print_zoom_buf(RPrint *p, RPrintZoomCallback cb, void *cbarg, ut64 from, ut64 to, int len, int maxlen);
+R_API void r_print_progressbar(RPrint *pr, int pc, int _cols, const char *title);
 R_API void r_print_progressbar_with_count(RPrint *pr, unsigned int pc, unsigned int total, int _cols, bool reset_line);
+R_API void r_print_spinbar(RPrint *p, const char *msg);
 R_API void r_print_portionbar(RPrint *p, const ut64 *portions, int n_portions);
 R_API void r_print_rangebar(RPrint *p, ut64 startA, ut64 endA, ut64 min, ut64 max, int cols);
 R_API char *r_print_randomart(const ut8 *dgst_raw, ut32 dgst_raw_len, ut64 addr);
@@ -267,6 +273,9 @@ R_API char* r_print_json_indent(const char* s, bool color, const char *tab, cons
 R_API char* r_print_json_human(const char* s);
 R_API char* r_print_json_path(const char* s, int pos);
 
+// code
+R_API char *r_print_code_tocolor(const char *s);
+R_API char *r_print_code_indent(const char *s);
 #endif
 
 #ifdef __cplusplus

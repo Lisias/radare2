@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2019-2022 - GustavoLCR */
+/* radare - LGPL - Copyright 2019-2023 - GustavoLCR */
 
 #include "le.h"
 #include <r_bin.h>
@@ -79,7 +79,7 @@ static RBinSymbol *__get_symbol(RBinLEObj *bin, ut64 *offset) {
 		r_bin_symbol_free (sym);
 		return NULL;
 	}
-	sym->name = name;
+	sym->name = r_bin_name_new (name);
 	ut16 entry_idx = r_buf_read_le16_at (bin->buf, *offset);
 	*offset += 2;
 	sym->ordinal = entry_idx;
@@ -206,7 +206,12 @@ R_IPI RList *r_bin_le_get_imports(RBinLEObj *bin) {
 		if (!imp) {
 			break;
 		}
-		imp->name = __read_nonnull_str_at (bin->buf, &offset);
+		const char *name = __read_nonnull_str_at (bin->buf, &offset);
+		if (!name) {
+			r_bin_import_free (imp);
+			break;
+		}
+		imp->name = r_bin_name_new (name);
 		if (!imp->name) {
 			r_bin_import_free (imp);
 			break;
@@ -215,7 +220,6 @@ R_IPI RList *r_bin_le_get_imports(RBinLEObj *bin) {
 		r_list_append (l, imp);
 	}
 	return l;
-
 }
 
 R_IPI RList *r_bin_le_get_entrypoints(RBinLEObj *bin) {
@@ -260,19 +264,32 @@ R_IPI RList *r_bin_le_get_libs(RBinLEObj *bin) {
 static void __create_iter_sections(RList *l, RBinLEObj *bin, RBinSection *sec, LE_object_page_entry *page, ut64 vaddr, int cur_page) {
 	r_return_if_fail (l && bin && sec && page);
 	LE_image_header *h = bin->header;
-	ut32 offset = (h->itermap + (page->offset << (bin->is_le ? 0 : h->pageshift)));
+	if (h->pageshift > ST16_MAX || h->pageshift < 0) {
+		// early quit before using an invalid offset
+		return;
+	}
+	ut32 pageshift = R_MIN ((ut64)h->pageshift, 63);
+	ut32 offset = (h->itermap + ((ut64)page->offset << (bin->is_le ? 0 : pageshift)));
 
 	// Gets the first iter record
 	ut16 iter_n = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+	if (iter_n == UT16_MAX) {
+		return;
+	}
 	offset += sizeof (ut16);
 	ut16 data_size = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+	if (data_size == UT16_MAX) {
+		return;
+	}
 	offset += sizeof (ut16);
 
+	ut64 total_size = r_buf_size (bin->buf);
 	ut64 tot_size = 0;
 	int iter_cnt = 0;
 	ut64 bytes_left = page->size;
-	while (iter_n && bytes_left > 0) {
+	while (iter_n > 0 && bytes_left > 0) {
 		int i;
+		tot_size = 0;
 		for (i = 0; i < iter_n; i++) {
 			RBinSection *s = R_NEW0 (RBinSection);
 			if (!s) {
@@ -288,6 +305,10 @@ static void __create_iter_sections(RList *l, RBinLEObj *bin, RBinSection *sec, L
 			s->add = true;
 			vaddr += data_size;
 			tot_size += data_size;
+			if (tot_size > total_size) {
+				R_LOG_DEBUG ("section exceeds file size");
+		//		break;
+			}
 			r_list_append (l, s);
 			iter_cnt++;
 		}
@@ -295,22 +316,27 @@ static void __create_iter_sections(RList *l, RBinLEObj *bin, RBinSection *sec, L
 		// Get the next iter record
 		offset += data_size;
 		iter_n = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+		if (iter_n == UT16_MAX) {
+			break;
+		}
 		offset += sizeof (ut16);
 		data_size = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+		if (data_size == UT16_MAX) {
+			break;
+		}
 		offset += sizeof (ut16);
 	}
 	if (tot_size < h->pagesize) {
 		RBinSection *s = R_NEW0 (RBinSection);
-		if (!s) {
-			return;
+		if (s) {
+			s->name = r_str_newf ("%s.page.%d.iter.zerofill", sec->name, cur_page);
+			s->bits = sec->bits;
+			s->perm = sec->perm;
+			s->vsize = h->pagesize - tot_size;
+			s->vaddr = vaddr;
+			s->add = true;
+			r_list_append (l, s);
 		}
-		s->name = r_str_newf ("%s.page.%d.iter.zerofill", sec->name, cur_page);
-		s->bits = sec->bits;
-		s->perm = sec->perm;
-		s->vsize = h->pagesize - tot_size;
-		s->vaddr = vaddr;
-		s->add = true;
-		r_list_append (l, s);
 	}
 }
 
@@ -403,7 +429,11 @@ R_IPI RList *r_bin_le_get_sections(RBinLEObj *bin) {
 					// TODO
 					R_LOG_WARN ("Compressed page not handled: %s", s->name);
 				} else if (page.flags != P_ZEROED) {
-					s->paddr = ((ut64)page.offset << h->pageshift) + pages_start_off;
+					if (h->pageshift > 63) {
+						continue;
+					}
+					ut32 pageshift = R_MIN (h->pageshift, 63);
+					s->paddr = ((ut64)page.offset << pageshift) + pages_start_off;
 				}
 			}
 			s->vsize = h->pagesize;
@@ -443,13 +473,21 @@ R_IPI RList *r_bin_le_get_relocs(RBinLEObj *bin) {
 	LE_image_header *h = bin->header;
 	ut64 cur_page = 0;
 	const ut64 fix_rec_tbl_off = (ut64)h->frectab + bin->headerOff;
-	ut64 offset = fix_rec_tbl_off + r_buf_read_ble32_at (bin->buf, (ut64)h->fpagetab + bin->headerOff + cur_page * sizeof (ut32), h->worder);
-	ut64 end = fix_rec_tbl_off + r_buf_read_ble32_at (bin->buf, (ut64)h->fpagetab + bin->headerOff + (cur_page + 1) * sizeof (ut32), h->worder);
+	ut32 ofa = r_buf_read_ble32_at (bin->buf, (ut64)h->fpagetab + bin->headerOff + cur_page * sizeof (ut32), h->worder);
+	if (ofa == UT32_MAX) {
+		return NULL;
+	}
+	ut64 offset = fix_rec_tbl_off + ofa;
+	ut32 ofb = r_buf_read_ble32_at (bin->buf, (ut64)h->fpagetab + bin->headerOff + (cur_page + 1) * sizeof (ut32), h->worder);
+	if (ofb == UT32_MAX) {
+		return NULL;
+	}
+	ut64 end = fix_rec_tbl_off + ofb;
 	const RBinSection *cur_section = (RBinSection *)r_list_get_n (sections, cur_page);
 	ut64 cur_page_offset = cur_section ? cur_section->vaddr : 0;
 	while (cur_page < h->mpages) {
-		RBinReloc *rel = R_NEW0 (RBinReloc);
 		bool rel_appended = false; // whether rel has been appended to l and must not be freed
+		RBinReloc *rel = R_NEW0 (RBinReloc);
 		if (!rel) {
 			break;
 		}
@@ -485,11 +523,17 @@ R_IPI RList *r_bin_le_get_relocs(RBinLEObj *bin) {
 			offset += sizeof (ut8);
 		} else {
 			source = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+			if (source == UT16_MAX) {
+				break;
+			}
 			offset += sizeof (ut16);
 		}
 		ut32 ordinal;
 		if (header.target & F_TARGET_ORD16) {
 			ordinal = r_buf_read_ble16_at (bin->buf, offset, h->worder);
+			if (ordinal == UT16_MAX) {
+				break;
+			}
 			offset += sizeof (ut16);
 		} else {
 			ordinal = r_buf_read8_at (bin->buf, offset);
@@ -532,7 +576,7 @@ R_IPI RList *r_bin_le_get_relocs(RBinLEObj *bin) {
 				ordinal = r_buf_read_ble16_at (bin->buf, offset, h->worder);
 				offset += sizeof (ut16);
 			}
-			imp->name = r_str_newf ("%s.%u", mod_name, ordinal);
+			imp->name = r_bin_name_new_from (r_str_newf ("%s.%u", mod_name, ordinal));
 			imp->ordinal = ordinal;
 			rel->import = imp;
 			free (mod_name);
@@ -555,7 +599,7 @@ R_IPI RList *r_bin_le_get_relocs(RBinLEObj *bin) {
 			ut64 off = (ut64)h->impproc + nameoff + bin->headerOff;
 			char *proc_name = __read_nonnull_str_at (bin->buf, &off);
 			char *mod_name = __get_modname_by_ord (bin, ordinal);
-			imp->name = r_str_newf ("%s.%s", r_str_get (mod_name), r_str_get (proc_name));
+			imp->name = r_bin_name_new_from (r_str_newf ("%s.%s", r_str_get (mod_name), r_str_get (proc_name)));
 			rel->import = imp;
 			break;
 		}
@@ -612,6 +656,9 @@ R_IPI RList *r_bin_le_get_relocs(RBinLEObj *bin) {
 			ut64 at = h->fpagetab + bin->headerOff;
 			ut32 w0 = r_buf_read_ble32_at (bin->buf, at + cur_page * sizeof (ut32), h->worder);
 			ut32 w1 = r_buf_read_ble32_at (bin->buf, at + (cur_page + 1) * sizeof (ut32), h->worder);
+			if (w0 == UT32_MAX || w1 == UT32_MAX) {
+				break;
+			}
 			offset = fix_rec_tbl_off + w0;
 			end = fix_rec_tbl_off + w1;
 			if (offset < end) {
@@ -673,6 +720,13 @@ R_IPI RBinLEObj *r_bin_le_new_buf(RBuffer *buf) {
 	bin->cpu = __get_cpu_type (bin);
 	bin->os = __get_os_type (bin);
 	bin->arch = __get_arch (bin);
+	{
+		/* dim objcnt */
+		ut64 maxcount = 0xfffff / sizeof (LE_object_entry);
+		if (h->objcnt > maxcount) {
+			h->objcnt = maxcount;
+		}
+	}
 	bin->objtbl = calloc (h->objcnt, sizeof (LE_object_entry));
 	if (!bin->objtbl) {
 		r_bin_le_free (bin);

@@ -67,8 +67,39 @@ R_API char* r_str_trim_lines(char *str) {
 	return r_strbuf_drain (sb);
 }
 
+R_API void r_str_trim_emptylines(char *str) {
+	r_str_trim_tail (str);
+	char *r = str;
+	while (*r) {
+		if (*r == '\n') {
+			r++;
+			// skip empty lines
+			char *nl = r;
+			while (*r && *r != '\n') {
+				if (!isspace (*r)) {
+					break;
+				}
+				r++;
+			}
+			if (*r == '\n') {
+				r_str_cpy (nl, r + 1);
+			}
+		}
+		if (!*r) {
+			break;
+		}
+		r++;
+	}
+}
+
 R_API char *r_str_trim_dup(const char *str) {
 	char *a = strdup (str);
+	r_str_trim (a);
+	return a;
+}
+
+R_API char *r_str_trim_ndup(const char *str, size_t n) {
+	char *a = r_str_ndup (str, n);
 	r_str_trim (a);
 	return a;
 }
@@ -190,10 +221,8 @@ R_API int r_str_ntrim(char *str, int length) {
 	r_return_val_if_fail (str && length >= 0, -1);
 	// r_str_trim_head (str);
 	char *p = str;
-	int left = 0;
 	for (; *p && IS_WHITECHAR (*p) && length > 0; p++) {
 		length--;
-		left++;
 	}
 	if (p != str && length > 0) {
 		memmove (str, p, length + 1);
@@ -244,7 +273,7 @@ R_API int r_str_ansi_trim(char *str, int str_len, int n) {
 					i += 18;
 				}
 			} else if (ch2 == '[') {
-				for (++i; (i < str_len) && str[i] && str[i] != 'J' && str[i] != 'm' && str[i] != 'H';
+				for (i++; (i < str_len) && str[i] && str[i] != 'J' && str[i] != 'm' && str[i] != 'H';
 					i++) {
 					;
 				}

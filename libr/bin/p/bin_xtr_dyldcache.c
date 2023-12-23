@@ -12,7 +12,7 @@ static RList *extractall(RBin *bin);
 static RBinXtrData *oneshot(RBin *bin, const ut8 *buf, ut64 size, int idx);
 static RList *oneshotall(RBin *bin, const ut8 *buf, ut64 size);
 
-static bool check_buffer(RBinFile *bf, RBuffer *buf) {
+static bool check(RBinFile *bf, RBuffer *buf) {
 	ut8 b[4] = {0};
 	r_buf_read_at (buf, 0, b, sizeof (b));
 	return !memcmp (buf, "dyld", 4);
@@ -76,7 +76,7 @@ static RBinXtrData *extract(RBin *bin, int idx) {
 		(struct r_bin_dyldcache_obj_t*)bin->cur->xtr_obj, idx, &nlib);
 
 	if (lib) {
-		RBinXtrMetadata *metadata = R_NEW0(RBinXtrMetadata);
+		RBinXtrMetadata *metadata = R_NEW0 (RBinXtrMetadata);
 		if (!metadata) {
 			free (lib);
 			return NULL;
@@ -166,9 +166,11 @@ static RList *oneshotall(RBin *bin, const ut8* buf, ut64 size) {
 }
 
 RBinXtrPlugin r_bin_xtr_plugin_xtr_dyldcache = {
-	.name = "xtr.dyldcache",
-	.desc = "dyld cache bin extractor plugin",
-	.license = "LGPL3",
+	.meta = {
+		.name = "xtr.dyldcache",
+		.desc = "dyld cache bin extractor plugin",
+		.license = "LGPL3",
+	},
 	.load = &load,
 	.extract = &extract,
 	.extractall = &extractall,
@@ -176,7 +178,7 @@ RBinXtrPlugin r_bin_xtr_plugin_xtr_dyldcache = {
 	.extract_from_bytes = &oneshot,
 	.extractall_from_bytes = &oneshotall,
 	.free_xtr = &free_xtr,
-	.check_buffer = &check_buffer,
+	.check = &check,
 };
 
 #ifndef R2_PLUGIN_INCORE
